@@ -18,5 +18,8 @@ class Value {
 
 public:
   Value() : n_(std::make_shared<Node>()) {}
+  explicit Value(double x) : n_(std::make_shared<Node>()) {n_->data = x;}
+  explicit Value(std::shared_ptr<Node> n) : n_(std::move(n)) {}
+
 };
 } // namespace forgeml

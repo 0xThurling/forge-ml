@@ -18,8 +18,56 @@ class Value {
 
 public:
   Value() : n_(std::make_shared<Node>()) {}
-  explicit Value(double x) : n_(std::make_shared<Node>()) {n_->data = x;}
+  explicit Value(double x) : n_(std::make_shared<Node>()) { n_->data = x; }
   explicit Value(std::shared_ptr<Node> n) : n_(std::move(n)) {}
 
+  double data() const { return n_->data; }
+  double grad() const { return n_->grad; }
+
+  friend Value operator+(const Value &a, const Value &b) {
+    auto out = std::make_shared<Node>();
+    out->data = a.n_->data + b.n_->data;
+    out->op = "+";
+    out->prev = {a.n_, b.n_};
+
+    std::weak_ptr<Node> wa = a.n_, wb = b.n_, wout = out;
+    out->backward = [wa, wb, wout]() {
+      auto pa = wa.lock(), pb = wb.lock(), po = wout.lock();
+      if (!pa || !pb || !po) return;
+      pa->grad += po->grad;
+      pb->grad += po->grad;
+    };
+
+    return Value(out);
+  }
+
+  friend Value operator+(const Value& a, double b) {
+      return a + Value(b);
+  }
+
+  friend Value operator+(double a, const Value& b) {
+      return Value(a) + b;
+  }
+
+  friend Value operator*(const Value& a, const Value& b) {
+    auto out = std::make_shared<Node>();
+    out->data = a.n_->data * b.n_->data;
+    out->op = "*";
+    out->prev = {a.n_, b.n_};
+
+    std::weak_ptr<Node> wa = a.n_, wb = b.n_, wout = out;
+    out->backward = [wa, wb, wout]() {
+      auto pa = wa.lock(), pb = wb.lock(), po = wout.lock();
+      if (!pa || !pb || !po) return;
+      pa->grad += pb->data * po->grad;
+      pb->grad += pa->data * po->grad;
+    };
+
+    return Value(out);
+  }
+
+  Value pow(const Value& a, double exp) {
+
+  };
 };
 } // namespace forgeml

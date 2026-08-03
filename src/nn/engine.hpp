@@ -1,3 +1,4 @@
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <string>
@@ -66,8 +67,34 @@ public:
     return Value(out);
   }
 
-  Value pow(const Value& a, double exp) {
+  friend Value operator*(const Value& a, double b) {
+      return a * Value(b);
+  }
 
+  friend Value operator*(double a, const Value& b) {
+      return Value(a) * b;
+  }
+
+  Value pow(double k) const {
+    auto out = std::make_shared<Node>();
+    out->data = std::pow(n_->data, k);
+    out->op = "**" + std::to_string(k);
+    out->prev = {n_};
+
+    std::weak_ptr<Node> wbase = n_, wout = out;
+    out->backward = [wbase, wout, k]() {
+        auto base = wbase.lock();
+        auto po = wout.lock();
+        if (!base || !po) return;
+        // d/dx (x^k) = k * x^(k-1)
+        base->grad += k * std::pow(base->data, k - 1.0) * po->grad;
+    };
+
+    return Value(out);
   };
+
+  friend Value operator/(const Value& a, const Value& b) {
+    return a * b.pow(-1.0);
+  }
 };
 } // namespace forgeml

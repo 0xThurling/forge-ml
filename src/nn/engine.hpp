@@ -1,4 +1,5 @@
 #include <cmath>
+#include <complex>
 #include <functional>
 #include <memory>
 #include <string>
@@ -95,6 +96,18 @@ public:
 
   friend Value operator/(const Value& a, const Value& b) {
     return a * b.pow(-1.0);
+  }
+
+  Value operator-() const {
+    return *this * Value(-1.0);
+  }
+
+  Value operator-(const Value &a) {
+      return *this + (-a);
+  }
+
+  friend Value operator-(double lhs, const Value &rhs) {
+      return Value(lhs) - rhs;
   }
 };
 } // namespace forgeml

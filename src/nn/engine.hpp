@@ -16,9 +16,8 @@ struct Node {
 namespace forgeml {
 // Stores scalar values and it's gradient
 class Value {
-  std::shared_ptr<Node> n_;
-
 public:
+  std::shared_ptr<Node> n_;
   Value() : n_(std::make_shared<Node>()) {}
   explicit Value(double x) : n_(std::make_shared<Node>()) { n_->data = x; }
   explicit Value(std::shared_ptr<Node> n) : n_(std::move(n)) {}

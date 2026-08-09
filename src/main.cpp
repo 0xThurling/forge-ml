@@ -1,20 +1,17 @@
-#include "math/calc.hpp"
-#include <iomanip>
+#include "./nn/engine.hpp"
 #include <iostream>
 
 int main() {
-  double xs[] = {-2.0, -1.0, 0.0, 1.0, 2.0};
+    forgeml::Value x{2.0};
+    forgeml::Value y{-3.0};
+    forgeml::Value z{10.0};
 
-  std::cout << std::fixed << std::setprecision(6);
-  for (double x : xs) {
-    double numerical = forgeml::numerical_derivative(forgeml::f, x);
-    double analytical = 2.0 * x;
+    forgeml::Value f = x * y + z;
 
-    std::cout << "x=" << std::setw(2) << static_cast<int>(x)
-              << "  f'(x) numerical=" << numerical
-              << "  analytical=" << std::setprecision(1) << analytical
-              << std::setprecision(6) << "\n";
-  }
+    f.backward();
 
-  return 0;
+    std::cout << "f.data = " << f.data() << "\n"; 
+    std::cout << "df/dx = " << x.grad() << "\n"; 
+    std::cout << "df/dy = " << y.grad() << "\n"; 
+    std::cout << "df/dz = " << z.grad() << "\n"; 
 }

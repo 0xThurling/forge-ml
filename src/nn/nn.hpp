@@ -1,3 +1,4 @@
+#pragma once
 #include "./engine.hpp"
 #include <cstddef>
 #include <random>
@@ -30,46 +31,83 @@ struct Neuron : Module {
     forgeml::Value act = b;
 
     for (std::size_t i = 0; i < w.size(); ++i) {
-        act = act + w[i] * x[i];
+      act = act + w[i] * x[i];
     }
 
     return nonlin ? act.relu() : act;
   }
 
   std::vector<forgeml::Value> parameters() override {
-      auto params = w;
-      params.push_back(b);
-      return params;
+    auto params = w;
+    params.push_back(b);
+    return params;
   }
 };
 
 struct Layer : Module {
- std::vector<Neuron> neurons;
+  std::vector<Neuron> neurons;
 
- Layer(int nin, int nout, bool nonlin = true) {
-     neurons.reserve(nout);
-     for (int i = 0; i < nout; ++i) {
-        neurons.emplace_back(nin, nonlin);
-     }
- }
+  Layer(int nin, int nout, bool nonlin = true) {
+    neurons.reserve(nout);
+    for (int i = 0; i < nout; ++i) {
+      neurons.emplace_back(nin, nonlin);
+    }
+  }
 
- std::vector<forgeml::Value> operator()(const std::vector<forgeml::Value>& x) const {
+  std::vector<forgeml::Value>
+  operator()(const std::vector<forgeml::Value> &x) const {
     std::vector<forgeml::Value> out;
     out.reserve(neurons.size());
-    for (auto& n : neurons) {
-        out.push_back(n(x));
+    for (auto &n : neurons) {
+      out.push_back(n(x));
     }
     return out;
- }
+  }
 
- std::vector<forgeml::Value> parameters() override {
-     std::vector<forgeml::Value> params;
+  std::vector<forgeml::Value> parameters() override {
+    std::vector<forgeml::Value> params;
 
-     for (auto& n : neurons) {
-        auto np = n.parameters();
-        params.insert(params.end(), np.begin(), np.end());
-     }
-     
-     return params;
- }
+    for (auto &n : neurons) {
+      auto np = n.parameters();
+      params.insert(params.end(), np.begin(), np.end());
+    }
+
+    return params;
+  }
+};
+
+struct MLP : Module {
+  std::vector<Layer> layers;
+
+  MLP(int nin, const std::vector<int> &nouts) {
+    std::vector<int> sz;
+    sz.reserve(nouts.size());
+    sz.push_back(nin);
+
+    for (int o : nouts) {
+      sz.push_back(o);
+    }
+
+    for (std::size_t i = 0; i + 1 < sz.size(); ++i) {
+      bool nonlin = (i + 1 != sz.size() - 1);
+      layers.emplace_back(sz[i], sz[i + 1], nonlin);
+    }
+  }
+
+  std::vector<forgeml::Value> operator()(std::vector<forgeml::Value> x) const {
+    for (auto &layer : layers)
+      x = layer(x);
+
+    return x;
+  }
+
+  std::vector<forgeml::Value> parameters() override {
+      std::vector<forgeml::Value> params;
+      for (auto& layer: layers) {
+          auto lp = layer.parameters();
+          params.insert(params.end(), lp.begin(), lp.end());
+      }
+
+      return params;
+  }
 };

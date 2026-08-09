@@ -2,6 +2,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 struct Node {
@@ -107,6 +108,41 @@ public:
 
   friend Value operator-(double lhs, const Value &rhs) {
       return Value(lhs) - rhs;
+  }
+
+  Value relu() const {
+      auto out = std::make_shared<Node>();
+      out->data = n_->data < 0.0 ? 0.0 : n_->data;
+      out->op = "ReLU";
+      out->prev = {n_};
+
+      std::weak_ptr<Node> win = n_, wout = out;
+      out->backward = [win, wout] () {
+        auto pi = win.lock(), po = wout.lock();
+        if (!pi || !po) return;
+        pi->grad += (po->data > 0.0 ? 1.0 : 0.0) * po->grad;
+      };
+
+      return Value(out);
+  }
+
+  void backward() {
+      std::vector<std::shared_ptr<Node>> topo;
+      std::unordered_set<Node*> seen;
+
+      std::function<void(const std::shared_ptr<Node>&)> dfs =
+          [&](const std::shared_ptr<Node>& cur){
+            if (!cur || seen.contains(cur.get())) return;
+            seen.insert(cur.get());
+            for (auto& p : cur->prev) dfs(p);
+            topo.push_back(cur);
+          };
+
+      dfs(n_);
+      n_->grad = 1.0;
+      for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
+        (*it)->backward();
+      }
   }
 };
 } // namespace forgeml

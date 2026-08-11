@@ -1,5 +1,6 @@
 #pragma once
 #include "./engine.hpp"
+#include <cmath>
 #include <cstddef>
 #include <random>
 #include <vector>
@@ -19,7 +20,10 @@ struct Neuron : Module {
 
   Neuron(int nin, bool nonlin_ = true) : w(nin), b(0.0), nonlin(nonlin_) {
     std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<double> dist(-1.0, 1.0);
+    // Scale by 1/sqrt(fan-in) so activations stay O(1) and ReLUs are less
+    // likely to die under random init.
+    const double bound = 1.0 / std::sqrt(static_cast<double>(nin));
+    std::uniform_real_distribution<double> dist(-bound, bound);
 
     for (auto &wi : w)
       wi = forgeml::Value(dist(rng));

@@ -7,6 +7,10 @@ start the next stage until the gate passes.
 Legend: `[ ]` todo, `[~]` in progress, `[x]` done. Copy this file or keep it
 updated as the project progresses.
 
+The GPU tier (stage 15) is opt-in and comes last: it is specified in
+[gpu.md](gpu.md) and depends on the CPU stack being green, because every device
+test compares against the CPU reference.
+
 ## Stage −1 — ForgeFP (already landed)
 
 The general infrastructure this stack consumes is implemented and tested in
@@ -49,7 +53,7 @@ Files:
       strides)
 
 ForgeFP usage: `fp::Buffer`, `fp::Result`, `fp::fail`, `fp::map`, `fp::to_vector`,
-`fp::fold_left`, `fp::sum`, `fp::simd::dot`, `fp::approx_equal`.
+`fp::fold_left`, `fp::sum`, `fp::dot`, `fp::approx_equal`.
 
 Tests:
 
@@ -75,7 +79,7 @@ Files:
 
 ForgeFP usage: `fp::softmax`, `fp::log_softmax`, `fp::logsumexp`, `fp::sigmoid`,
 `fp::relu`, `fp::clamp`, `fp::zip_with`, `fp::fold_left`, `fp::sum`,
-`fp::simd::dot`, `fp::transform_inplace`, `fp::central_difference`.
+`fp::dot`, `fp::transform_inplace`, `fp::central_difference`.
 
 Tests:
 
@@ -99,8 +103,8 @@ Files:
       (`fp::Rng::shuffle`, `fp::views::chunk`)
 
 ForgeFP usage: `fp::Rng`, `fp::Validation`, `fp::traverse`, `fp::views::chunk`,
-`fp::map_to`, `fp::io::read_lines`, `fp::str::split_any`,
-`fp::str::parse_numbers`, `fp::linalg::col_means`, `fp::map2d_indexed`.
+`fp::map_to`, `fp::read_lines`, `fp::str::split_any`,
+`fp::str::parse_numbers`, `fp::col_means`, `fp::map2d_indexed`.
 
 Tests:
 
@@ -125,8 +129,8 @@ Files:
 - [ ] `src/optim/adam.hpp` — Adam, AdamW
 - [ ] `src/optim/lr_scheduler.hpp` — constant, step, linear, cosine
 
-ForgeFP usage: `fp::linalg::mean/variance/argmax`, `fp::zip_with`, `fp::fold_left`,
-`fp::simd::dot`, `fp::simd::axpy_inplace`, `fp::zip_transform_inplace`,
+ForgeFP usage: `fp::mean/variance/argmax`, `fp::zip_with`, `fp::fold_left`,
+`fp::dot`, `fp::axpy_inplace`, `fp::zip_transform_inplace`,
 `fp::for_each`, `fp::approx_equal`.
 
 Tests:
@@ -146,7 +150,7 @@ Files:
 - [ ] `src/model/linear_regression.hpp` — GD + optional closed form, L1/L2
 
 ForgeFP usage: `fp::matvec`, `fp::matmul`, `fp::transpose`, `fp::solve`,
-`fp::zip_with`, `fp::scale`, `fp::transform_inplace`, `fp::simd::dot`.
+`fp::zip_with`, `fp::scale`, `fp::transform_inplace`, `fp::dot`.
 
 Tests:
 
@@ -184,7 +188,7 @@ Files:
 - [ ] `src/model/naive_bayes.hpp` — Gaussian NB (Multinomial later)
 - [ ] `src/model/decision_tree.hpp` — CART classifier (Gini/entropy)
 
-ForgeFP usage: `fp::linalg::mean/variance`, `fp::softmax`, `fp::logsumexp`,
+ForgeFP usage: `fp::mean/variance`, `fp::softmax`, `fp::logsumexp`,
 `fp::log`, `fp::group_by`, `fp::fix` (recursive tree build), `fp::sort_by`,
 `fp::views::enumerate`, `fp::argmax`.
 
@@ -203,7 +207,7 @@ Files:
 - [ ] `src/model/svm.hpp` — linear SVM, labels in {-1, +1}, hinge loss + L2
 
 ForgeFP usage: `fp::matvec`, `fp::zip_transform_inplace`,
-`fp::scale`, `fp::fold_left`, `fp::simd::axpy_inplace`.
+`fp::scale`, `fp::fold_left`, `fp::axpy_inplace`.
 
 Tests:
 
@@ -267,7 +271,7 @@ Files:
 - [ ] `src/nn/autodiff.hpp` — optional: the scalar `Value` engine (teaching example)
 
 ForgeFP usage: `fp::matmul`, `fp::add_row_broadcast`, `fp::softmax_rows`,
-`fp::simd::dot`, `fp::map_to`, `fp::par_for`, `fp::Buffer`,
+`fp::dot`, `fp::map_to`, `fp::par_for`, `fp::Buffer`,
 `fp::central_difference` (gradient checks).
 
 Tests:
@@ -287,7 +291,7 @@ Files:
 - [ ] `src/nn/embedding.hpp`
 
 ForgeFP usage: `fp::matmul`, `fp::add_row_broadcast`, `fp::sigmoid`,
-`fp::clamp`, `fp::grid::windows2d`, `fp::Buffer`, `fp::par_for`.
+`fp::clamp`, `fp::windows2d`, `fp::Buffer`, `fp::par_for`.
 
 Tests:
 
@@ -308,7 +312,7 @@ Files:
 - [ ] `src/nn/encoder_transformer.hpp`, `src/nn/decoder_transformer.hpp`
 
 ForgeFP usage: `fp::matmul`, `fp::batched_matmul`, `fp::transpose`,
-`fp::softmax_rows`, `fp::numerics::softmax`, `fp::linalg::mean/variance`,
+`fp::softmax_rows`, `fp::softmax`, `fp::mean/variance`,
 `fp::map2d_indexed`, `fp::par_for`, `fp::Buffer`.
 
 Tests:
@@ -331,7 +335,7 @@ Files:
 - [ ] `src/llm/sampling.hpp` — greedy, temperature, top-k, top-p
 - [ ] `src/llm/checkpoint.hpp` — save/load weights + config + tokenizer
 
-ForgeFP usage: `fp::Rng`, `fp::categorical`, `fp::softmax`, `fp::logsumexp`,
+ForgeFP usage: `fp::Rng` (`rng.categorical`), `fp::softmax`, `fp::logsumexp`,
 `fp::sort_by`, `fp::scan`, `fp::Stopwatch`, `fp::to_text`/`from_text`,
 `fp::write_bytes`, `fp::ensure_directory`, `fp::str::split_any`,
 `fp::transform_inplace`, `fp::par_for`.
@@ -346,6 +350,48 @@ Gate (milestone M7): train a character-level GPT on a small text file until it
 generates recognizable words/structure; perplexity drops by at least 2x from
 initialization.
 
+## Stage 15 — GPU acceleration (opt-in)
+
+Spec: [gpu.md](gpu.md). Prerequisite: stages 4 and 11–13 are green on the CPU —
+the CPU path is the reference every device test compares against, and it stays
+the default.
+
+Files:
+
+- [ ] `src/gpu/dispatch.hpp` — `available()`, `should_use(n)`,
+      `should_use_matmul(m, k, n)`; the measured thresholds in one place
+- [ ] `src/gpu/device_tensor.hpp` — `DeviceTensor<T>`: shape +
+      `fp::gpu::Buffer<T>`; `from_host` / `to_host` / `copy_from` (pinned
+      staging) / `is_resident()`
+- [ ] `src/gpu/optim.hpp` — device optimizer steps over resident parameters
+      (`fp::gpu::axpy_inplace`, `transform_inplace`)
+- [ ] `src/gpu/linear.hpp` — device dense layer mirroring `nn/linear.hpp`
+- [ ] `src/gpu/attention.hpp` — device scaled dot-product attention
+      (`fp::gpu::matmul`, `softmax_rows_wg`)
+- [ ] `test/gpu_test.cpp` — device-gated: round-trips, matmul/softmax/optimizer
+      vs the CPU within tolerance
+- [ ] `test/gpu_training_test.cpp` — device-gated end-to-end: a fixed-seed
+      MLP/attention reaches the same loss as the CPU within tolerance
+
+ForgeFP usage: `fp::gpu::Buffer`, `HostBuffer`, `Scratch`, `matmul`,
+`batched_matmul`, `transpose`, `softmax_rows_wg`, `transform_inplace`,
+`transform_inplace_indexed` (causal mask), `zip_transform_inplace` /
+`zip3_transform_inplace` (AdamW), `axpy_inplace`, `reduce`, `dot`, `row_means`,
+`add_row_broadcast`, `fp::approx_equal`.
+
+Tests:
+
+- [ ] device vs CPU per operation (skip without a device, never fail)
+- [ ] one batch through pinned and pageable staging gives identical values
+- [ ] the dispatch thresholds agree with `bench/gpu_bench.cpp` on the machine
+
+Gate (milestone M8): with a device present, a 2-block decoder attention block
+trained on the CPU and on the device with the same seed agrees within tolerance;
+without a device, the whole suite still passes.
+
+Effort: 2–3 days — the kernels already exist in ForgeFP, so this is storage,
+dispatch, and tests.
+
 ## Milestones
 
 | Milestone | After stage | Passing condition |
@@ -357,6 +403,7 @@ initialization.
 | M5 | 11 | MLP solves XOR; every gradient check < 1e-6 |
 | M6 | 12 | CNN > 95% on synthetic images; LSTM learns a toy sequence |
 | M7 | 14 | Char GPT loss decreases; samples look like the corpus |
+| M8 | 15 | CPU and GPU training agree within tolerance; the suite passes without a device |
 
 ## Effort guide
 
@@ -374,6 +421,7 @@ initialization.
 | 12 | 3–5 days | 11 |
 | 13 | 3–5 days | 11, 12 |
 | 14 | 2–4 days | 13 |
+| 15 | 2–3 days | 4, 11–13 |
 
 The estimates are lower than the original plan because ForgeFP already provides
 linear algebra, numerics, randomness, serialization, autodiff, and the

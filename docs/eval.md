@@ -12,7 +12,7 @@ Files: `scoring.hpp`, `cross_validation.hpp`, `grid_search.hpp`.
 | File | ForgeFP functions |
 |---|---|
 | `scoring.hpp` | `fp::Result`, `fp::fail`, `std::function` wrappers only |
-| `cross_validation.hpp` | `fp::Rng`, `fp::views::enumerate`, `fp::map`, `fp::fold_left`, `fp::linalg::mean/variance` |
+| `cross_validation.hpp` | `fp::Rng`, `fp::views::enumerate`, `fp::map`, `fp::fold_left`, `fp::mean/variance` |
 | `grid_search.hpp` | `fp::cartesian_product`, `fp::sort_by`, `fp::str::join`, `fp::views::enumerate`, `fp::map` |
 
 The Cartesian grid is `fp::cartesian_product`; ranking is `fp::sort_by` with

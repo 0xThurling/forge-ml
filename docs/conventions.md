@@ -113,7 +113,7 @@ inline fp::Result<Matrix> matmul(Matrix const &a, Matrix const &b) {
 | Collect several errors | `fp::Validation`, `fp::validate_all` | manual error vectors |
 | Iterate / transform a range | `fp::map`, `fp::filter`, `fp::fold_left`, `fp::zip_with` | hand-rolled index loops in non-hot code |
 | Mutate in place (hot) | `fp::for_each`, `fp::transform_inplace`, `fp::map_to`, `fp::zip_transform_inplace` | eager combinators in a loop |
-| Accumulate numbers | `fp::sum`, `fp::fold_left`, `fp::simd::dot`, `fp::simd::reduce` | `std::accumulate` in hot paths |
+| Accumulate numbers | `fp::sum`, `fp::fold_left`, `fp::dot`, `fp::reduce` | `std::accumulate` in hot paths |
 | Matrix math | `fp::matmul`, `fp::matvec`, `fp::solve`, `fp::transpose`, `fp::row_sums`, … | per-model triple loops |
 | Stable probability math | `fp::softmax`, `fp::softmax_rows`, `fp::log_softmax`, `fp::logsumexp`, `fp::sigmoid` | `exp(x)/sum(exp(x))` |
 | Randomness | `fp::Rng` passed explicitly | `std::random_device`, statics |
@@ -192,7 +192,7 @@ name collides with a keyword (`lambda_`, `type_`).
   order and cache behavior apply unchanged.
 - `reserve()` when the final size is known; reuse `fp::Buffer` scratch across
   batches instead of allocating per step.
-- Optimizer updates use `fp::simd::axpy_inplace` / `fp::
+- Optimizer updates use `fp::axpy_inplace` / `fp::
   zip_transform_inplace`; parameter updates never allocate.
 - Large independent work (row-wise transforms, tiled kernels) uses
   `fp::par_for` / `fp::par_map_to` with a reused `fp::ThreadPool`.

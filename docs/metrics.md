@@ -12,9 +12,9 @@ Files: `regression.hpp`, `confusion_matrix.hpp`, `classification.hpp`.
 
 | File | ForgeFP functions |
 |---|---|
-| `regression.hpp` | `fp::zip_with`, `fp::fold_left`, `fp::sum`, `fp::linalg::mean`, `fp::simd::dot`, `fp::approx_equal`, `fp::Result` |
+| `regression.hpp` | `fp::zip_with`, `fp::fold_left`, `fp::sum`, `fp::mean`, `fp::dot`, `fp::approx_equal`, `fp::Result` |
 | `confusion_matrix.hpp` | `fp::count_if`, `fp::Result`, `fp::fail` |
-| `classification.hpp` | `fp::linalg::argmax_rows`, `fp::sort_by`, `fp::scan`, `fp::count`, `fp::Result` |
+| `classification.hpp` | `fp::argmax_rows`, `fp::sort_by`, `fp::scan`, `fp::count`, `fp::Result` |
 
 All reductions (`sum`, `mean`, `variance`, `dot`) come from fp — metrics only
 define the ML-specific formulas on top.
@@ -60,9 +60,9 @@ Rules:
 - `r2_score` returns `fp::fail("r2_score: constant target has no variance")`
   when `SS_tot < 1e-12`.
 - ForgeFP implementation: `residuals` is `fp::zip_with(y_true, y_pred, fp::minus)`;
-  the squared/absolute sums use `fp::simd::dot` (squares) or
+  the squared/absolute sums use `fp::dot` (squares) or
   `fp::fold_left(..., fp::plus)`; `rmse` is `std::sqrt` of that;
-  `r2_score` uses `fp::linalg::mean` for the total sum of squares.
+  `r2_score` uses `fp::mean` for the total sum of squares.
 
 Tests:
 

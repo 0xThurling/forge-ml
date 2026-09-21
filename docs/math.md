@@ -8,7 +8,7 @@ Almost all of the math a model needs already lives in ForgeFP:
 | reductions | `fp::linalg` (`dot`, `norm_l1/l2`, `argmax`, `mean`, `variance`, `row_sums`, `col_sums`, `row_means`, `col_means`, `argmax_rows`) |
 | stable probabilities | `fp::numerics` (`softmax`, `softmax_rows`, `log_softmax`, `logsumexp`, `sigmoid`, `relu`, `clamp`) |
 | elementwise math | `fp::ops` (`abs`, `sqrt`, `exp`, `log`, `log1p`, `sign`, `min_`, `max_`, `pow`, `clamp`) |
-| numerical derivatives | `fp::numerics::central_difference`, `fp::ad::derivative` |
+| numerical derivatives | `fp::central_difference`, `fp::ad::derivative` |
 | grid math | `fp::grid` (`map2d`, `map2d_indexed`, `map2d_inplace`, `for_each_index`) |
 
 What is left for `ml/math/` is only what is *about machine learning*:
@@ -24,8 +24,8 @@ Files: `activations.hpp`, `losses.hpp`, `stats.hpp`.
 | File | ForgeFP functions |
 |---|---|
 | `activations.hpp` | `fp::map`, `fp::transform_inplace`, `fp::exp`, `fp::sigmoid`, `fp::relu` |
-| `losses.hpp` | `fp::zip_with`, `fp::fold_left`, `fp::sum`, `fp::simd::dot`, `fp::log_softmax`, `fp::softmax`, `fp::clamp`, `fp::max_`, `fp::transform_inplace`, `fp::central_difference` (tests) |
-| `stats.hpp` | `fp::linalg::mean/variance`, `fp::fold_left`, `fp::count_if`, `fp::map`, `fp::sort`, `fp::for_each`, `fp::simd::dot` |
+| `losses.hpp` | `fp::zip_with`, `fp::fold_left`, `fp::sum`, `fp::dot`, `fp::log_softmax`, `fp::softmax`, `fp::clamp`, `fp::max_`, `fp::transform_inplace`, `fp::central_difference` (tests) |
+| `stats.hpp` | `fp::mean/variance`, `fp::fold_left`, `fp::count_if`, `fp::map`, `fp::sort`, `fp::for_each`, `fp::dot` |
 
 ---
 
@@ -226,7 +226,7 @@ Tests (`test/stats_test.cpp`):
 | Old file | Replacement |
 |---|---|
 | `math/linalg.hpp` | `fp::linalg` (`matmul`, `matvec`, `outer`, `solve`, `hadamard`, `scale`, `add_row_broadcast`, `dot`, norms, `argmax`, `mean`, `variance`, row/column reductions) |
-| `math/calc.hpp` | `fp::numerics::central_difference`; for exact derivatives `fp::ad::derivative`; the gradient-check harness is `utils/gradient_check.hpp` |
+| `math/calc.hpp` | `fp::central_difference`; for exact derivatives `fp::ad::derivative`; the gradient-check harness is `utils/gradient_check.hpp` |
 
 Shape preconditions are documented and asserted in debug inside `fp::linalg`;
 domain code validates shapes at its own boundary (see

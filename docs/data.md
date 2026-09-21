@@ -14,7 +14,7 @@ Files: `dataset.hpp`, `dataloader.hpp`, `split.hpp`, `scaling.hpp`,
 |---|---|
 | `dataset.hpp` | `fp::Validation`, `fp::to_result`, `fp::fail`, `fp::read_lines`, `fp::str::split_any`, `fp::str::parse_numbers`, `fp::is_finite` |
 | `split.hpp` | `fp::Rng`, `fp::Rng::shuffle`, `fp::Rng::sample_indices`, `fp::Result`, `fp::range` |
-| `scaling.hpp` | `fp::linalg::col_means`, `fp::map2d`, `fp::map2d_indexed`, `fp::transform_inplace`, `fp::map_to` |
+| `scaling.hpp` | `fp::col_means`, `fp::map2d`, `fp::map2d_indexed`, `fp::transform_inplace`, `fp::map_to` |
 | `encoding.hpp` | `fp::str::to_lower`, `fp::sort`, `fp::unique`, `fp::argmax`, `fp::map` |
 | `dataloader.hpp` | `fp::views::chunk`, `fp::Rng::shuffle`, `fp::map_to`, `fp::Buffer` (reused batch storage) |
 
@@ -190,7 +190,7 @@ Rules:
 - `inverse_transform(transform(X)) ≈ X` within `1e-9`.
 - Scalers store only vectors, so they serialize trivially.
 
-ForgeFP implementation: `fit` is `fp::linalg::col_means` plus
+ForgeFP implementation: `fit` is `fp::col_means` plus
 `math/stats.hpp::col_stddevs` (per-column variance is the one statistics gap in
 fp today); `transform` is `fp::map2d_indexed(X, ...)` or
 `fp::map_to(X, out, ...)` when the caller reuses a buffer;
@@ -236,7 +236,7 @@ private:
 // One-hot: (n, k) matrix of 0/1.
 Matrix<double> one_hot(std::vector<int> const &codes, std::size_t num_classes);
 
-// Argmax decode uses fp::linalg::argmax_rows directly — do not reimplement it.
+// Argmax decode uses fp::argmax_rows directly — do not reimplement it.
 
 // Binary mapping for logistic regression / SVM: {a,b} -> {0,1} or {-1,+1}.
 struct BinaryLabelMap {
@@ -253,7 +253,7 @@ Rules:
 - `transform` on an unseen label returns `fail("unknown label: ...")`, never a
   silent `-1`.
 - `one_hot` validates codes are in range.
-- Decoding probabilities to classes is `fp::linalg::argmax_rows` (first max on
+- Decoding probabilities to classes is `fp::argmax_rows` (first max on
   ties); `encoding.hpp` does not duplicate it.
 - Sorting/normalizing label text uses `fp::str::to_lower`/`trim`;
   `classes_` is built with `fp::sort` + `fp::unique`.

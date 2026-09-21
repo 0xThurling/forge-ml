@@ -31,11 +31,18 @@ with an acceptance gate.
 
 ## Non-goals
 
-- GPU, distributed training, mixed precision (documented as future work).
+- Distributed training and mixed precision (documented as future work).
 - Competing with PyTorch on performance; the target is clarity plus
   cache-friendly loops.
 - Reimplementing anything ForgeFP already provides (linear algebra, RNG,
   serialization, autodiff, arenas, stopwatches).
+
+GPU acceleration is **opt-in, not a non-goal**: ForgeFP's SYCL tier
+(`fp/gpu.hpp`) covers the kernels this stack needs, and [gpu.md](gpu.md)
+specifies which ForgeML operations use it, where data crosses the bus, and how
+the device path is tested against the CPU reference. Small models stay on the
+CPU by design — the measured crossovers are in
+[`fp/GPU.md`](../../fp/GPU.md#measured-crossovers-rtx-3060-wsl2).
 
 ## What ForgeFP provides (do not reimplement)
 
@@ -73,6 +80,7 @@ with an acceptance gate.
 | `utils/` | assertions, logging, checkpoint schema, gradient-check harness |
 | `nn/` | parameters, layers, sequential network, CNN/RNN/LSTM/embedding/attention/transformers |
 | `llm/` | tokenizer, LM dataset, causal LM, trainer, sampling, checkpoints |
+| `gpu/` *(opt-in)* | device tensors, device optimizer/linear/attention, dispatch thresholds — see [gpu.md](gpu.md) |
 
 ## Architecture principles
 
@@ -145,6 +153,8 @@ ml/
 │   │               encoder_transformer.hpp decoder_transformer.hpp
 │   ├── llm/        tokenizer.hpp dataset.hpp causal_lm.hpp trainer.hpp
 │   │               sampling.hpp checkpoint.hpp
+│   ├── gpu/        dispatch.hpp device_tensor.hpp linear.hpp attention.hpp
+│   │               optim.hpp          (opt-in; see gpu.md)
 │   └── main.cpp
 ├── test/           one *_test.cpp per module
 ├── docs/           this directory
@@ -167,7 +177,7 @@ The existing `src/` is the **seed**: `Vector`/`Matrix` aliases, `linalg`,
 | `src/core/vector.hpp` | `core/vector.hpp` (`Vector<T>`, range-friendly) |
 | `src/core/matrix.hpp` | `core/matrix.hpp` (grid-backed `Matrix<T>`, so `fp::linalg` applies directly) |
 | `src/math/linalg.hpp` | deleted — use `fp::linalg` |
-| `src/math/calc.hpp` | deleted — use `fp::numerics`/`fp::autodiff` |
+| `src/math/calc.hpp` | deleted — use `fp/numerics.hpp` and `fp/autodiff.hpp` |
 | `src/nn/engine.hpp` | `nn/parameter.hpp` + `nn/layer.hpp` + `nn/network.hpp` (scalar `Value` stays as an optional teaching example) |
 | `src/nn/nn.hpp` | `model/` (classical models) + `nn/` (layers) |
 
@@ -187,6 +197,7 @@ The existing `src/` is the **seed**: `Vector`/`Matrix` aliases, `linalg`,
 | [utils.md](utils.md) | Assertions, logging, checkpoint schema, gradient checking |
 | [nn.md](nn.md) | Parameters, layers, backprop, CNN/RNN/LSTM/attention/transformers |
 | [llm.md](llm.md) | Tokenizer, causal LM, trainer, sampling, checkpointing |
+| [gpu.md](gpu.md) | The opt-in GPU tier: device tensors, which kernels, dispatch thresholds, testing |
 
 ## Definition of done (per file)
 
@@ -202,6 +213,9 @@ The existing `src/` is the **seed**: `Vector`/`Matrix` aliases, `linalg`,
 6. No hidden state: no global mutable data, no implicit RNG, no `std::cout` in
    library code.
 7. Documented formulas match the implementation.
+8. Files with a GPU path (see [gpu.md](gpu.md)) are tested against their CPU
+   counterpart within the documented tolerance, and the CPU path remains the
+   default and the reference.
 
 ## Verification strategy
 

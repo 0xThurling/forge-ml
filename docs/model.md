@@ -14,12 +14,12 @@ Files: `model.hpp`, `linear_regression.hpp`, `logistic_regression.hpp`,
 
 | Model | ForgeFP functions |
 |---|---|
-| `linear_regression` | `fp::matvec`, `fp::matmul`, `fp::transpose`, `fp::solve`, `fp::zip_with`, `fp::linalg::mean`, `fp::simd::axpy_inplace`, `fp::transform_inplace` |
-| `logistic_regression` | `fp::sigmoid`, `fp::matvec`, `fp::matmul`, `fp::transpose`, `fp::transform_inplace`, `fp::linalg::mean` |
-| `naive_bayes` | `fp::linalg::mean/variance`, `fp::softmax`, `fp::log`, `fp::logsumexp`, `fp::group_by`, `fp::argmax`, `fp::map` |
+| `linear_regression` | `fp::matvec`, `fp::matmul`, `fp::transpose`, `fp::solve`, `fp::zip_with`, `fp::mean`, `fp::axpy_inplace`, `fp::transform_inplace` |
+| `logistic_regression` | `fp::sigmoid`, `fp::matvec`, `fp::matmul`, `fp::transpose`, `fp::transform_inplace`, `fp::mean` |
+| `naive_bayes` | `fp::mean/variance`, `fp::softmax`, `fp::log`, `fp::logsumexp`, `fp::group_by`, `fp::argmax`, `fp::map` |
 | `decision_tree` | `fp::fix` (recursive build), `fp::sort_by`, `fp::views::enumerate`, `fp::count_if`, `fp::remove_if` |
-| `svm` | `fp::matvec`, `fp::zip_transform_inplace`, `fp::scale`, `fp::fold_left`, `fp::simd::axpy_inplace` |
-| `model.hpp` | `fp::Result`, `fp::fail`, `fp::linalg::mean`, `fp::approx_equal` |
+| `svm` | `fp::matvec`, `fp::zip_transform_inplace`, `fp::scale`, `fp::fold_left`, `fp::axpy_inplace` |
+| `model.hpp` | `fp::Result`, `fp::fail`, `fp::mean`, `fp::approx_equal` |
 
 ---
 

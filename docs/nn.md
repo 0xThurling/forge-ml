@@ -17,27 +17,28 @@ Files: `parameter.hpp`, `layer.hpp`, `linear.hpp`, `activation.hpp`,
 
 | File | ForgeFP functions |
 |---|---|
-| `parameter.hpp` | `fp::Rng`, `fp::Buffer` (flat parameter storage), `fp::normal`, `fp::uniform`, `fp::fill`, `fp::map` |
+| `parameter.hpp` | `fp::Rng` (`rng.normal`, `rng.uniform`), `fp::Buffer` (flat parameter storage), `fp::fill`, `fp::map` |
 | `layer.hpp` | `fp::Result`, `fp::Buffer` |
-| `linear.hpp` | `fp::matmul`, `fp::transpose`, `fp::add_row_broadcast`, `fp::linalg::row_sums`, `fp::map_to` |
-| `activation.hpp` | `fp::sigmoid`, `fp::relu`, `fp::softmax_rows`, `fp::numerics::softmax`, `fp::transform_inplace`, `fp::map` |
+| `linear.hpp` | `fp::matmul`, `fp::transpose`, `fp::add_row_broadcast`, `fp::col_sums` (bias gradient), `fp::map_to` |
+| `activation.hpp` | `fp::sigmoid`, `fp::relu`, `fp::softmax_rows`, `fp::softmax`, `fp::transform_inplace`, `fp::map` |
 | `network.hpp` | `fp::for_each`, `fp::views::enumerate`, `fp::reverse`, `fp::Buffer` (per-layer caches) |
-| `conv2d.hpp` | `fp::grid::windows2d`, `fp::map2d`, `fp::matmul`, `fp::for_each_index`, `fp::Buffer` |
+| `conv2d.hpp` | `fp::matmul`, `fp::for_each_index`, `fp::Buffer` (`im2col`/`col2im` are `detail::` helpers here — `fp::windows2d` is the non-overlapping *pooling* primitive, not convolution) |
 | `pooling.hpp` | `fp::map2d`, `fp::for_each_index`, `fp::Buffer` |
-| `rnn_cell.hpp` / `rnn.hpp` | `fp::matmul`, `fp::add_row_broadcast`, `fp::tanh` (`fp::ad::tanh` for scalars), `fp::linalg::row_sums` |
+| `rnn_cell.hpp` / `rnn.hpp` | `fp::matmul`, `fp::add_row_broadcast`, `fp::tanh` (`fp::ad::tanh` for scalars), `fp::col_sums` (bias gradient) |
 | `lstm_cell.hpp` / `lstm.hpp` | `fp::matmul`, `fp::sigmoid`, `fp::add_row_broadcast`, `fp::hadamard`, `fp::zip_transform_inplace` |
 | `embedding.hpp` | `fp::Buffer`, `fp::for_each_index` (scatter-add), `fp::Rng` |
 | `attention.hpp` / `multi_head_attention.hpp` | `fp::matmul`, `fp::batched_matmul`, `fp::transpose`, `fp::softmax_rows`, `fp::scale` |
 | `positional_encoding.hpp` | `fp::linspace`, `fp::map2d_indexed`, `fp::sin`/`fp::cos` (elementwise via `fp::map`) |
-| `layer_norm.hpp` | `fp::linalg::row_means`, `fp::map2d`, `fp::scale`, `fp::add_row_broadcast` |
-| `feed_forward.hpp` | `fp::matmul`, `fp::add_row_broadcast`, `fp::gelu`/`fp::relu` |
+| `layer_norm.hpp` | `fp::row_means`, `fp::map2d`, `fp::scale`, `fp::add_row_broadcast` |
+| `feed_forward.hpp` | `fp::matmul`, `fp::add_row_broadcast`, `ml::math::gelu`/`fp::relu` |
 | `transformer_block.hpp` | the above, plus `fp::zip_transform_inplace` for residual adds |
 | `encoder/decoder_transformer.hpp` | `fp::matmul`, `fp::softmax_rows`, `fp::Buffer`, `fp::par_for` |
 | gradient checks | `fp::central_difference`, `fp::ad::derivative`, `fp::approx_equal` |
 
 Every dense computation in this layer is an fp kernel: `fp::matmul` (i-k-j),
 `fp::add_row_broadcast` (bias), `fp::softmax_rows` (attention weights),
-`fp::linalg::row_sums` (bias gradients), `fp::simd::axpy_inplace` (optimizer
+`fp::col_sums` (bias gradients: sum the batch axis of a `(B, out)` grid),
+`fp::axpy_inplace` (optimizer
 updates). The nn layer owns the *structure* (what is a layer, what is cached,
 what the backward pass is), not the arithmetic.
 
@@ -166,7 +167,7 @@ Forward / backward:
 y = x W + b                       (b broadcasts over the batch)
 
 dL/dW = x^T (dL/dy)
-dL/db = sum_rows(dL/dy)
+dL/db = col_sums(dL/dy)           # sum the batch axis
 dL/dx = (dL/dy) W^T
 ```
 
@@ -183,7 +184,7 @@ auto y = fp::add_row_broadcast(fp::matmul(x, W_.value), b_.value[0]);
 
 // backward (grad_out = dL/dy)
 W_.grad = fp::matmul(fp::transpose(x_cache_), grad_out);   // accumulate
-auto db = fp::linalg::row_sums(grad_out);                  // then add into b_.grad
+auto db = fp::col_sums(grad_out);                  // sum over the batch axis
 return fp::matmul(grad_out, fp::transpose(W_.value));
 ```
 
@@ -431,7 +432,7 @@ Backward (backprop through time):
 ```text
 dh = dL/dh_t + dh_next
 dz = dh * (1 - h_t^2)
-dWx += x_t^T dz ; dWh += h_{t-1}^T dz ; db += sum_rows(dz)
+dWx += x_t^T dz ; dWh += h_{t-1}^T dz ; db += col_sums(dz)   # batch axis
 dx_t   = dz Wx^T
 dh_prev = dz Wh^T
 ```
@@ -486,7 +487,7 @@ do = dh * tanh(c_t)          dtanh_c = dh * o_t
 dc += dtanh_c * (1 - tanh(c_t)^2)
 df = dc * c_{t-1}            dc_prev = dc * f_t
 di = dc * g_t                dg = dc * i_t * (1 - g_t^2)
-d(bf,bi,bo,bg) = sum_rows(...)   for each gate pre-activation
+d(bf,bi,bo,bg) = col_sums(...)   # sum the batch axis of each gate pre-activation
 dW*, dU* = x_t^T dpre, h_{t-1}^T dpre
 dx_t = sum_gate dpre * W^T ; dh_prev = sum_gate dpre * U^T
 ```
@@ -591,14 +592,35 @@ Rules:
   copying per head.
 - Cache `A` for backward; do not recompute softmax.
 
-ForgeFP implementation: `scores = fp::batched_matmul(Q, fp::transpose(K))`
-followed by `fp::scale(scores, 1/sqrt(d_k))`; the mask is
-`fp::map2d_indexed` (or a `for_each_index` pass) writing `-1e9` where
-`j > i`; the weights are `fp::softmax_rows(scores)` in place; the context is
-`fp::batched_matmul(A, V)`. The backward pass uses `fp::transpose` +
-`fp::batched_matmul` for `dV`/`dA`/`dQ`/`dK` and `fp::inplace` for the
-softmax Jacobian scaling. `fp::par_for` splits the batch when the sequence is
-long.
+ForgeFP implementation — **per batch (and per head) on 2-D matrices**: fp's
+linalg takes grids (`std::vector<std::vector<T>>`), and `fp::transpose`,
+`fp::softmax_rows` and `fp::map2d_*` are 2-D. `fp::batched_matmul` is 3-D
+`(B, m, k)·(B, k, n)`, so it cannot combine with a 2-D `fp::transpose`; split
+the head axis with reshape + transpose first, then loop with `fp::par_for` over
+the batch when the sequence is long:
+
+```cpp
+// per batch b: Q_b (Tq, d), K_b (Tk, d), V_b (Tk, d)
+auto scores = fp::matmul(Q_b, fp::transpose(K_b));            // (Tq, Tk)
+
+// Scale + causal mask in one allocation-free in-place pass.
+for (auto &&[i, row] : fp::views::enumerate(scores))
+  fp::for_each_index(row, [&](std::size_t j, double &s) {
+    s = (causal && j > i) ? -1e9 : s / std::sqrt(static_cast<double>(d_k));
+  });
+
+fp::softmax_rows(scores);                                     // in place
+auto context = fp::matmul(scores, V_b);                       // (Tq, d)
+```
+
+(`fp::map2d_indexed(scores, f)` is the allocating alternative when the mask is
+built into a fresh grid.)
+
+The backward pass mirrors it per batch: `dV = fp::matmul(fp::transpose(A), dContext)`,
+`dA = fp::matmul(dContext, fp::transpose(V))`, the softmax Jacobian scaling
+with `fp::inplace`, then `dQ = fp::matmul(dS, K)` and
+`dK = fp::matmul(fp::transpose(dS), Q)`. `fp::par_for` splits the batch (or the
+batch × head pairs) when the sequence is long.
 
 Tests (`test/attention_test.cpp`):
 
@@ -683,12 +705,17 @@ y     = gamma * xhat + beta
 
 dxhat = dy * gamma
 dx = (1 / (d * sqrt(var+eps))) * (d * dxhat - sum(dxhat) - xhat * sum(dxhat * xhat))
-dgamma = sum_rows(dy * xhat)
-dbeta  = sum_rows(dy)
+dgamma = col_sums(dy * xhat)      # sum the batch axis
+dbeta  = col_sums(dy)             # sum the batch axis
 ```
 
 Rules: cache `xhat` and `inv_std`; `eps` outside the sqrt; gamma initialized to
 1, beta to 0.
+
+Naming: `sum(...)` inside the `dx` formula reduces the **feature** axis of a
+`(B, d)` row, i.e. `fp::row_sums`. The parameter gradients (`dgamma`, `dbeta`,
+and every bias above) reduce the **batch** axis, i.e. `fp::col_sums`. The two
+are easy to transpose by accident — the gradient check is what catches it.
 
 Tests: output rows have mean ~0 and variance ~1; gradient check; gamma/beta
 gradients.

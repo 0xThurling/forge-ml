@@ -16,7 +16,7 @@ Files: `tokenizer.hpp`, `dataset.hpp`, `causal_lm.hpp`, `trainer.hpp`,
 | `tokenizer.hpp` | `fp::str::split_any`, `fp::str::join`, `fp::sort`, `fp::unique`, `fp::group_by`, `fp::for_each`, `fp::Result` |
 | `dataset.hpp` | `fp::Rng`, `fp::Buffer` (token storage), `fp::views::chunk`, `fp::map_to` |
 | `causal_lm.hpp` | `fp::matmul`, `fp::softmax_rows`, `fp::Buffer`, `fp::par_for` |
-| `trainer.hpp` | `fp::Stopwatch`, `fp::log_softmax`, `fp::is_finite`, `fp::for_each`, `fp::par_for`, `fp::simd::axpy_inplace` |
+| `trainer.hpp` | `fp::Stopwatch`, `fp::log_softmax`, `fp::is_finite`, `fp::for_each`, `fp::par_for`, `fp::axpy_inplace` |
 | `sampling.hpp` | `fp::softmax`, `fp::logsumexp`, `fp::sort_by`, `fp::scan`, `fp::argmax`, `fp::Rng::categorical` |
 | `checkpoint.hpp` | `fp::to_text`/`from_text`, `fp::to_bytes`/`from_bytes`, `fp::write_bytes`, `fp::read_bytes`, `fp::ensure_directory` |
 
@@ -306,7 +306,7 @@ Rules:
 - ForgeFP implementation: the loss is `math/losses.hpp`'s CCE (which calls
   `fp::log_softmax`); gradient clipping is one `fp::fold_left` over the
   parameter grads plus `fp::transform_inplace` to scale them;
-  optimizer steps are `fp::simd::axpy_inplace`; step timing is
+  optimizer steps are `fp::axpy_inplace`; step timing is
   `fp::Stopwatch::lap()`; evaluation is wrapped in
   `fp::scope_exit`-style restore (grad mode) and never calls `optimizer.step`.
 

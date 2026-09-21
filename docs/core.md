@@ -13,9 +13,9 @@ Files: `shape.hpp`, `vector.hpp`, `matrix.hpp`, `tensor.hpp`.
 | File | ForgeFP functions |
 |---|---|
 | `shape.hpp` | `fp::Result`, `fp::fail`, `fp::ok` |
-| `vector.hpp` | `fp::map`, `fp::fold_left`, `fp::sum`, `fp::simd::dot`, `fp::approx_equal` (tests) |
-| `matrix.hpp` | `fp::Validation`, `fp::to_result`, `fp::transpose`, `fp::map2d`, `fp::for_each_index`, `fp::linalg::*` (directly on the grid) |
-| `tensor.hpp` | `fp::Buffer`, `fp::Result`, `fp::for_each`, `fp::transform_inplace`, `fp::simd::map_inplace` |
+| `vector.hpp` | `fp::map`, `fp::fold_left`, `fp::sum`, `fp::dot`, `fp::approx_equal` (tests) |
+| `matrix.hpp` | `fp::Validation`, `fp::to_result`, `fp::transpose`, `fp::map2d`, `fp::for_each_index`, `fp::matmul`/`fp::row_sums`/… (directly on the grid) |
+| `tensor.hpp` | `fp::Buffer`, `fp::Result`, `fp::for_each`, `fp::transform_inplace`, `fp::map_inplace` |
 
 There is no `core/random.hpp`: randomness is `fp::Rng` from
 `fp/random.hpp`.
@@ -129,12 +129,12 @@ Design decisions:
 - `span()` is the API for inner loops and `fp::simd` calls.
 
 ForgeFP usage: `fp::map`/`fp::fold_left`/`fp::sum` in tests and utilities;
-`fp::simd::dot` for the hot inner product; `fp::approx_equal` for comparisons.
+`fp::dot` for the hot inner product; `fp::approx_equal` for comparisons.
 
 Tests:
 
 - construction, copy/move, `resize`, iterators, `span().size() == size()`
-- `fp::sum(v)` and `fp::simd::dot(v, v)` are correct on a known vector
+- `fp::sum(v)` and `fp::dot(v, v)` are correct on a known vector
 - `at` out of range triggers `ML_ASSERT`
 
 ---
@@ -265,7 +265,7 @@ Rules:
 - Strides are computed once in the constructor: `stride[i] = prod(shape[i+1:])`.
 - `at` asserts `idx.size() == rank()` and each index in range.
 - The flat buffer is a range, so `fp::for_each`, `fp::transform_inplace`, and
-  `fp::simd::map_inplace` work on the tensor directly.
+  `fp::map_inplace` work on the tensor directly.
 - 4-D convention for images: `(batch, channels, height, width)`. 3-D convention
   for sequences: `(batch, time, features)`. Documented in `conv2d.hpp` and
   never mixed.
@@ -273,7 +273,7 @@ Rules:
   asserts.
 
 ForgeFP usage: `fp::Buffer`, `fp::Result`, `fp::for_each`,
-`fp::transform_inplace`, `fp::simd::map_inplace`.
+`fp::transform_inplace`, `fp::map_inplace`.
 
 Tests:
 

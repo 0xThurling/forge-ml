@@ -13,13 +13,13 @@ Files: `optimizer.hpp`, `gradient_descent.hpp`, `sgd.hpp`, `adam.hpp`,
 | File | ForgeFP functions |
 |---|---|
 | `optimizer.hpp` | `fp::Result`, `fp::fail`, `fp::Buffer` (per-parameter state) |
-| `gradient_descent.hpp` | `fp::zip_transform_inplace`, `fp::simd::axpy_inplace`, `fp::zip_with` |
-| `sgd.hpp` | `fp::zip_transform_inplace`, `fp::simd::axpy_inplace`, `fp::linalg::scale` |
-| `adam.hpp` | `fp::for_each`, `fp::zip_for_each`, `fp::map`, `fp::simd::axpy_inplace` |
+| `gradient_descent.hpp` | `fp::zip_transform_inplace`, `fp::axpy_inplace`, `fp::zip_with` |
+| `sgd.hpp` | `fp::zip_transform_inplace`, `fp::axpy_inplace`, `fp::scale` |
+| `adam.hpp` | `fp::for_each`, `fp::zip_for_each`, `fp::map`, `fp::axpy_inplace` |
 | `lr_scheduler.hpp` | `std::cos` only; schedules are pure scalar math |
 
 Optimizer updates are the canonical zero-cost path: `w -= lr * g` is
-`fp::simd::axpy_inplace(w, -lr, g)`, and momentum is
+`fp::axpy_inplace(w, -lr, g)`, and momentum is
 `fp::zip_transform_inplace`. No step allocates after the first.
 
 ---
@@ -107,13 +107,13 @@ ForgeFP implementation (all allocation-free after the first step):
 
 ```cpp
 // plain
-fp::simd::axpy_inplace(value, -lr_, grad);
+fp::axpy_inplace(value, -lr_, grad);
 
 // momentum: v = momentum * v + g ; w -= lr * v
 fp::zip_for_each(velocity, grad, [&](double &v, double g) {
   v = momentum_ * v + g;
 });
-fp::simd::axpy_inplace(value, -lr_, velocity);
+fp::axpy_inplace(value, -lr_, velocity);
 ```
 
 Velocity state is stored per parameter (keyed by `&value`); use `fp::Buffer`
@@ -156,7 +156,7 @@ w  <- w - lr * v
 
 ForgeFP implementation: one fused pass
 `fp::zip_for_each(value, grad, ...)` that reads `w`, computes `g'`,
-updates `v`, and writes `w`; or two passes with `fp::simd::axpy_inplace` when
+updates `v`, and writes `w`; or two passes with `fp::axpy_inplace` when
 `weight_decay == 0`.
 
 Tests:

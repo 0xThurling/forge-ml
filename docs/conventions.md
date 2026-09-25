@@ -160,6 +160,11 @@ name collides with a keyword (`lambda_`, `type_`).
 ## Types and numeric rules
 
 - Default scalar is `double`; containers are `template <class T = double>`.
+- **Precision policy**: kernels are templated on `forgeml::Scalar`
+  (`src/core/scalar.hpp`); a `FORGEML_SINGLE_PRECISION` build uses `float` for
+  PyTorch-class throughput, while tests and references stay `double`
+  ([performance.md](performance.md#precision-policy)). Reductions accumulate in
+  `double` even in a float build.
 - `Vector<T>` is a contiguous 1-D container that is a range; `Matrix<T>` is a
   **grid** (`std::vector<Vector<T>>`, row-major) so every `fp::linalg` and
   `fp::grid` function applies directly. `Tensor<T>` uses `fp::Buffer<T>` for
@@ -186,6 +191,23 @@ name collides with a keyword (`lambda_`, `type_`).
 - Sampling without replacement and weighted choice come from `fp::Rng`
   (`sample_indices`, `categorical`); do not hand-roll them.
 
+## Determinism
+
+What is promised, per path — the contract tests rely on:
+
+| Path | Promise |
+|---|---|
+| CPU, `double`, seeded `fp::Rng` | **bit-reproducible** (same seed → same bits) |
+| CPU, float32 build | bit-reproducible for elementwise kernels; reductions may differ from the double build by the tolerance |
+| `fp::par_for` reductions | **not** bit-reproducible (the split order varies); tests compare with `fp::approx_equal` |
+| GPU kernels | elementwise bit-identical to the CPU; `matmul`/reductions/softmax within the documented tolerance ([gpu.md](gpu.md#opt-in-mechanics)) |
+| RL tier | seeded runs, reported as means with confidence intervals; never a single run ([rl.md](rl.md#the-tier-contract)) |
+| Benchmarks | real time, shapes in the label, machine state recorded ([performance.md](performance.md#measurement)) |
+
+The rules that follow: a test that needs bit equality uses the single-threaded
+CPU path; a test that accepts tolerance says so in its name or assertion; no
+module may claim determinism it does not have.
+
 ## Performance rules
 
 - Row-major grids; `Matrix` rows are `Vector`s, so `fp::matmul`'s `i-k-j`
@@ -200,6 +222,10 @@ name collides with a keyword (`lambda_`, `type_`).
   place.
 - A raw loop is acceptable only in a numeric kernel that fp does not provide;
   it gets a one-line comment saying why.
+- **Budgets are gates**: every hot stage has a benchmark with a shape and a
+  budget, a training step allocates nothing after warm-up (`perf/alloc_counter`),
+  and a >5% regression fails `forge bench --compare` — see
+  [performance.md](performance.md#budgets-and-gates).
 
 ## Logging and output
 

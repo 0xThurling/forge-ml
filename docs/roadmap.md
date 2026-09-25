@@ -101,6 +101,11 @@ Files:
 - [ ] `src/data/encoding.hpp` — `LabelEncoder`, one-hot helpers (`fp::str`)
 - [ ] `src/data/dataloader.hpp` — mini-batch iteration with shuffle
       (`fp::Rng::shuffle`, `fp::views::chunk`)
+- [ ] `src/data/shards.hpp` — disk-backed streams over **dsio** shards
+      (CPU), with the GPUDirect seam noted for the GPU tier
+      ([plan](../../dsio/docs/ml-integration.md),
+      [API](../../dsio/docs/usage.md),
+      [lesson](loading.md))
 
 ForgeFP usage: `fp::Rng`, `fp::Validation`, `fp::traverse`, `fp::views::chunk`,
 `fp::map_to`, `fp::read_lines`, `fp::str::split_any`,
@@ -392,6 +397,461 @@ without a device, the whole suite still passes.
 Effort: 2–3 days — the kernels already exist in ForgeFP, so this is storage,
 dispatch, and tests.
 
+## Coverage expansion (E1–E11) — the comprehensive pass
+
+Stages 0–15 cover the classical core, the neural stack and a tiny LLM. These
+expansion stages fill the rest of the field. They are **independent of each
+other** (E2 underpins E3–E9) and slot in after the stages named in their
+headers; each ends with its own gate. Docs are written alongside each stage.
+
+### E1 — Features and data preparation (after Stage 3)
+
+Spec: [features.md](features.md).
+
+Files:
+
+- [ ] `src/features/impute.hpp` — mean/median/mode/constant/forward fill
+- [ ] `src/features/binning.hpp` — equal-width, quantile, one-hot-of-bins
+- [ ] `src/features/polynomial.hpp` — polynomial and interaction features
+- [ ] `src/features/text.hpp` — bag-of-words, n-grams, TF-IDF, hashing
+- [ ] `src/features/select.hpp` — variance threshold, mutual information, L1
+      (with `model/linear`), recursive elimination
+- [ ] `src/features/imbalance.hpp` — class weights, random over/under-sampling
+      (SMOTE-lite: k-NN interpolation)
+- [ ] `src/features/augment.hpp` — image flips/crops/rotation/color jitter,
+      tabular noise; all `fp::Rng`-driven and deterministic
+- [ ] `test/features_test.cpp`
+
+ForgeFP usage: `fp::Rng`, `fp::map2d`, `fp::col_means`, `fp::views::chunk`,
+`fp::str::split_any`, `fp::sort_by`, `fp::Validation`.
+
+Gate: an imbalanced, ragged, mixed-type table becomes a clean numeric matrix
+with deterministic augmentation, and feature selection keeps a planted signal.
+
+### E2 — Probability and statistics (after Stage 2)
+
+Spec: [probability.md](probability.md).
+
+Files:
+
+- [ ] `src/prob/distributions.hpp` — Gaussian, Bernoulli, Categorical, Poisson,
+      Exponential, Beta, Gamma, Dirichlet: `logpdf`, `pdf`, `cdf` (where
+      closed-form), `mean`, `variance`, `sample(fp::Rng&)`
+- [ ] `src/prob/info.hpp` — entropy, cross-entropy, KL, JS, mutual
+      information, perplexity
+- [ ] `src/prob/bayes.hpp` — conjugate updates (Beta–Bernoulli,
+      Dirichlet–Categorical, Normal–Normal), MAP estimates
+- [ ] `src/prob/sampling.hpp` — inverse-CDF, rejection, importance,
+      Metropolis–Hastings, Gibbs
+- [ ] `src/prob/stats.hpp` — MLE, bootstrap CIs, permutation tests, t/Welch,
+      chi-square, KS
+- [ ] `test/prob_test.cpp`
+
+ForgeFP usage: `fp::Rng`, `fp::numerics` (`logsumexp`), `fp::linalg`
+(`mean`, `variance`, `dot`), `fp::Validation`, `fp::approx_equal`.
+
+Gate: distribution moments match hand values; KL ≥ 0 with equality iff equal;
+MCMC recovers a known posterior mean within tolerance.
+
+### E3 — Nearest neighbors and density (after Stage 9)
+
+Spec: [neighbors.md](neighbors.md).
+
+Files:
+
+- [ ] `src/neighbors/knn.hpp` — classification/regression, distance metrics
+      (L1/L2/cosine), weighted voting, brute force + k-d tree
+- [ ] `src/neighbors/kde.hpp` — Gaussian/Epanechnikov kernels, bandwidth rules
+- [ ] `src/neighbors/lof.hpp` — local outlier factor
+- [ ] `test/neighbors_test.cpp`
+
+ForgeFP usage: `fp::sort_by_cached`, `fp::views::window`, `fp::linalg`
+(`norm_l2`, `dot`), `fp::Rng`.
+
+Gate: k-NN matches brute force against a k-d tree; LOF flags planted outliers.
+
+### E4 — Clustering (after E2)
+
+Spec: [clustering.md](clustering.md).
+
+Files:
+
+- [ ] `src/cluster/kmeans.hpp` — k-means++ init, Lloyd, mini-batch, k by
+      elbow/silhouette
+- [ ] `src/cluster/gmm.hpp` — EM, covariance types, BIC/AIC
+- [ ] `src/cluster/dbscan.hpp` — density clustering, noise points
+- [ ] `src/cluster/agglomerative.hpp` — single/complete/average/ward linkage
+- [ ] `src/cluster/metrics.hpp` — silhouette, Davies–Bouldin, Calinski–Harabasz
+- [ ] `test/cluster_test.cpp`
+
+ForgeFP usage: `fp::Rng`, `fp::linalg` (`row_sums`, `matvec`, `norm_l2`),
+`fp::inplace`, `fp::views::chunk`.
+
+Gate: k-means recovers three planted Gaussian blobs; DBSCAN separates them
+from noise; cluster metrics rank the true k first.
+
+### E5 — Dimensionality reduction (after E2)
+
+Spec: [reduction.md](reduction.md).
+
+Files:
+
+- [ ] `src/reduce/pca.hpp` — covariance eigendecomposition, explained variance,
+      whitening, projection/inverse
+- [ ] `src/reduce/kernel_pca.hpp` — RBF/linear kernels
+- [ ] `src/reduce/lda.hpp` — Fisher discriminant, multi-class
+- [ ] `src/reduce/projections.hpp` — Gaussian and sparse random projections
+- [ ] `src/reduce/nmf.hpp` — multiplicative updates
+- [ ] `test/reduce_test.cpp`
+
+ForgeFP usage: `fp::linalg` (`matmul`, `transpose`, `solve`, `dot`),
+`fp::grid`, `fp::Rng`, `fp::approx_equal`.
+
+Gate: PCA on correlated data keeps ≥ 95% variance in two components; LDA
+separates two planted classes; random projections preserve pairwise distances
+within the JL bound.
+
+### E6 — Ensembles (after Stage 7 and E3)
+
+Spec: [ensembles.md](ensembles.md).
+
+Files:
+
+- [ ] `src/ensemble/bagging.hpp` — bootstrap sampling, OOB error
+- [ ] `src/ensemble/forest.hpp` — random forest (feature subsampling,
+      importance, regression/classification)
+- [ ] `src/ensemble/boosting.hpp` — AdaBoost, gradient boosting (shrinkage,
+      subsampling, regression/classification)
+- [ ] `src/ensemble/stacking.hpp` — voting/averaging, out-of-fold stacking
+- [ ] `test/ensemble_test.cpp`
+
+ForgeFP usage: `fp::Rng` (`sample_indices`), `fp::views::chunk`,
+`fp::par_map` (independent learners), `fp::sort_by`.
+
+Gate: a forest beats a single CART tree on a planted noisy dataset; boosting
+drives training error toward zero; stacking beats its best base learner.
+
+### E7 — Interpretation and calibration (after Stage 9)
+
+Spec: [interpret.md](interpret.md).
+
+Files:
+
+- [ ] `src/interpret/importance.hpp` — permutation importance, tree importance
+- [ ] `src/interpret/pdp.hpp` — partial dependence and ICE curves
+- [ ] `src/interpret/calibration.hpp` — reliability curve, Platt scaling,
+      isotonic regression
+- [ ] `src/interpret/curves.hpp` — ROC/PR curves with thresholds, AUC/AP,
+      threshold selection
+- [ ] `src/interpret/learning.hpp` — learning/validation curves
+- [ ] `test/interpret_test.cpp`
+
+ForgeFP usage: `fp::Rng` (permutations), `fp::sort_by`, `fp::views::chunk`,
+`fp::grid`, `fp::linalg` (`mean`).
+
+Gate: permutation importance ranks a planted feature first; Platt scaling
+turns a miscalibrated score into a calibrated one (ECE halves); the ROC curve
+matches a hand-computed example.
+
+### E8 — Time series (after E3)
+
+Spec: [timeseries.md](timeseries.md).
+
+Files:
+
+- [ ] `src/timeseries/window.hpp` — lag/rolling features, expanding statistics
+- [ ] `src/timeseries/stationary.hpp` — differencing, ACF/PACF
+- [ ] `src/timeseries/arima.hpp` — AR/MA/ARIMA via conditional least squares
+- [ ] `src/timeseries/smoothing.hpp` — SES, Holt, Holt–Winters
+- [ ] `src/timeseries/backtest.hpp` — rolling-origin splits, forecast metrics
+      (MAE/RMSE/MAPE/sMAPE/MASE)
+- [ ] `test/timeseries_test.cpp`
+
+ForgeFP usage: `fp::views::windows`, `fp::linalg` (`solve`, `dot`),
+`fp::inplace`, `fp::Rng`.
+
+Gate: ARIMA beats a naive last-value forecast on a planted AR(2) series;
+Holt–Winters tracks a seasonal series; backtesting never leaks the future.
+
+### E9 — Recommender systems (after E2)
+
+Spec: [recommend.md](recommend.md).
+
+Files:
+
+- [ ] `src/recsys/mf.hpp` — matrix factorization by SGD and ALS (explicit and
+      implicit feedback)
+- [ ] `src/recsys/ranking.hpp` — precision@k, recall@k, MAP, NDCG
+- [ ] `src/recsys/baseline.hpp` — most-popular and bias baselines
+- [ ] `test/recsys_test.cpp`
+
+ForgeFP usage: `fp::Rng`, `fp::linalg` (`matmul`, `solve`, `dot`),
+`fp::inplace`, `fp::sort_by_cached`.
+
+Gate: MF beats the popularity baseline on held-out interactions; NDCG matches
+a hand-computed ranking.
+
+### E10 — LLM inference (after Stage 14)
+
+Spec: [inference.md](inference.md).
+
+Files:
+
+- [ ] `src/inference/kv_cache.hpp` — pre-allocated KV cache, sliding window,
+      eviction policy
+- [ ] `src/inference/sampling.hpp` — temperature, top-k, top-p, typical,
+      repetition penalty, beam search (extends `llm/sampling`)
+- [ ] `src/inference/quantize.hpp` — int8/int4 group-wise quantization and
+      dequantized matmul/embedding lookups
+- [ ] `src/inference/batch.hpp` — batched/continuous decoding over a queue
+- [ ] `src/inference/finetune.hpp` — LoRA adapters (train/merge)
+- [ ] `test/inference_test.cpp`
+
+ForgeFP usage: `fp::Buffer`, `fp::linalg`, `fp::numerics` (`softmax`,
+`logsumexp`), `fp::inplace`, `fp::Rng`.
+
+Gate: cached decoding is bit-identical to full recomputation and faster;
+int8 quantization stays within tolerance of fp32; beam search beats greedy on
+a planted sequence.
+
+### E11 — Reinforcement learning (optional tier, after E3)
+
+Spec: [rl.md](rl.md). Explicitly optional: nothing above depends on it.
+
+Files:
+
+- [ ] `src/rl/bandit.hpp` — ε-greedy, UCB1, Thompson sampling
+- [ ] `src/rl/tabular.hpp` — Q-learning, SARSA, TD(0), eligibility traces
+- [ ] `src/rl/env.hpp` — a tiny deterministic environment interface
+      (gridworld, chain) for tests
+- [ ] `test/rl_test.cpp`
+
+ForgeFP usage: `fp::Rng`, `fp::map_values`, `fp::views::chunk`, `fp::inplace`.
+
+Gate: bandits converge to the best arm; Q-learning solves the test gridworld
+with a fixed seed.
+
+### E12 — Performance program (cross-cutting, from Stage 11 on)
+
+Spec: [performance.md](performance.md). Not a layer: the harness, the
+precision switch and the budgets every later stage must meet.
+
+Files:
+
+- [ ] `src/core/scalar.hpp` — `forgeml::Scalar` (float32 builds via
+      `FORGEML_SINGLE_PRECISION`); kernels templated on it
+- [ ] `perf/timer.hpp` — named phase timers (`forward`/`backward`/`optimizer`/`data wait`)
+- [ ] `perf/alloc_counter.hpp` — allocation and byte counters
+- [ ] `perf/memory.hpp` — parameters/activations/caches/batch resident bytes
+- [ ] `bench/*.cpp` — one benchmark per hot module, shapes in the labels
+- [ ] `bench/compare/*.py` + `report.py` — PyTorch reference scripts and the ratio table
+- [ ] `test/perf_test.cpp` — a training step allocates nothing after warm-up
+
+ForgeFP usage: `fp::Stopwatch`, `fp::par_for`, `fp::simd`, `fp::Buffer`,
+`fp::Arena`.
+
+Gate: the ratio table exists for the reference workloads (≤ 2× classical,
+≤ 3× deep CPU, ≤ 3× covered GPU kernels); a training step performs zero
+allocations after warm-up; `forge bench --compare --fail-over 5` is wired into
+every hot stage.
+
+### E13 — Deep RL (after E11)
+
+Spec: [rl.md](rl.md). The tier stays isolated: nothing imports it, and its
+benchmarks share no budget with the core.
+
+Files:
+
+- [ ] `src/rl/policy_gradient.hpp` — REINFORCE with returns-to-go and a baseline
+- [ ] `src/rl/actor_critic.hpp` — A2C with an entropy bonus
+- [ ] `src/rl/dqn.hpp` — replay ring, target network, ε decay
+- [ ] `src/rl/ppo.hpp` — GAE(λ), clipped surrogate, KL early stop
+- [ ] `src/rl/env.hpp` — `ContinuousEnv`, `CartPole`, `ContinuousBandit`
+- [ ] `test/rl_deep_test.cpp` — seeded episode budgets per algorithm
+- [ ] `test/rl_isolation_test.cpp` — nothing outside `rl/` includes `rl/`
+
+ForgeFP usage: `fp::Rng`, `fp::numerics` (`log_softmax`), `fp::Buffer` (replay),
+`fp::linalg::dot`, `fp::inplace`.
+
+Gate: each algorithm reaches its environment's `solved_return()` within the
+documented episode budget (mean over seeded runs with a confidence interval);
+the isolation test passes.
+
+### E14 — GPU depth (after Stage 15)
+
+Spec: [gpu.md](gpu.md). Completes the coverage matrix and the transfer
+overlap; the CPU path remains the reference.
+
+Files:
+
+- [ ] `src/gpu/conv.hpp` — im2col + device GEMM (a direct kernel is future work)
+- [ ] `src/gpu/norm.hpp` — device LayerNorm/RMSNorm, dropout masks
+- [ ] `src/gpu/kv_cache.hpp` — device-resident KV buffers for `inference/kv_cache.hpp`
+- [ ] `src/gpu/overlap.hpp` — double-buffered pinned staging, batch `n+1` copying while step `n` computes
+- [ ] `bench/compare/kernels_cuda.py` — the CUDA reference numbers
+- [ ] `test/gpu_coverage_test.cpp` — every matrix row: device vs CPU within tolerance
+
+ForgeFP usage: `fp::gpu::matmul`, `transform_inplace_indexed`,
+`add_row_broadcast`, `row_means`, `HostBuffer`, `Scratch`, `fp::approx_equal`.
+
+Gate: the coverage matrix is green on the RTX 3060 (within 3× CUDA for covered
+kernels); the overlap hides the host copy (step time ≈ compute time); the
+suite still passes with `FORGEML_DISABLE_GPU=1` and without a device.
+
+### E15 — Graph neural networks (after Stage 11)
+
+Spec: [gnn.md](gnn.md).
+
+Files:
+
+- [ ] `src/gnn/graph.hpp` — `Graph`, adjacency, self-loops, normalization, batching, permutation
+- [ ] `src/gnn/gcn.hpp` — graph convolution layers + a masked-node training step
+- [ ] `src/gnn/gat.hpp` — neighbour attention (multi-head)
+- [ ] `src/gnn/pool.hpp` — mean/max/top-k graph readout
+- [ ] `test/gnn_test.cpp`
+
+ForgeFP usage: `fp::linalg::matmul`, `fp::numerics` (`softmax`), `fp::sort_by`,
+`fp::views::chunk`, `fp::Rng`.
+
+Gate: permutation equivariance for both layers; a planted community graph is
+classified; GAT learns to weight an informative edge; batching and pooling
+never leak across graphs; gradient checks pass.
+
+### E16 — Bayesian optimization (after E12)
+
+Spec: [bayesopt.md](bayesopt.md).
+
+Files:
+
+- [ ] `src/bayesopt/gp.hpp` — GP regression (RBF/Matérn), Cholesky, marginal likelihood
+- [ ] `src/bayesopt/acquisition.hpp` — EI, PI, UCB
+- [ ] `src/bayesopt/search.hpp` — the BO loop, random and grid baselines
+- [ ] `test/bayesopt_test.cpp`
+
+ForgeFP usage: `fp::linalg` (`matmul`, `solve`), `fp::Rng`,
+`fp::sort_by_cached`, `fp::views::chunk`.
+
+Gate: the GP matches a hand-computed posterior; acquisition functions match
+hand-computed values; BO beats random search at an equal budget on planted
+functions; a CV hyperparameter search improves on the default.
+
+### E17 — Active learning (after Stage 9)
+
+Spec: [active.md](active.md).
+
+Files:
+
+- [ ] `src/active/query.hpp` — least-confident, margin, entropy, committee, k-center
+- [ ] `src/active/loop.hpp` — the label-budget loop with stopping rules
+- [ ] `test/active_test.cpp`
+
+ForgeFP usage: `fp::numerics` (`entropy`), `fp::sort_by_cached`, `fp::Rng`,
+`fp::views::chunk`.
+
+Gate: scores match hand-computed values; the loop respects the budget and
+never repeats a label; on planted data active learning is measurably more
+label-efficient than random sampling.
+
+### E18 — Semi- and self-supervised learning (after Stage 11 and E3)
+
+Spec: [semi.md](semi.md).
+
+Files:
+
+- [ ] `src/semi/pseudo.hpp` — self-training with a confidence threshold and class balance
+- [ ] `src/semi/propagate.hpp` — label propagation on a k-NN graph
+- [ ] `src/semi/contrastive.hpp` — InfoNCE with augmentations
+- [ ] `test/semi_test.cpp`
+
+ForgeFP usage: `fp::Rng`, `fp::numerics` (`log_softmax`), `fp::linalg`,
+`fp::sort_by_cached`.
+
+Gate: each method beats its supervised-only baseline with few labels;
+propagation recovers planted clusters from a handful of seeds; InfoNCE
+embeddings are usable by a k-NN classifier where raw features are not.
+
+### E19 — Anomaly detection (after E3)
+
+Spec: [anomaly.md](anomaly.md).
+
+Files:
+
+- [ ] `src/anomaly/isolation.hpp` — isolation forest
+- [ ] `src/anomaly/one_class.hpp` — one-class SVM (reuses the SMO solver)
+- [ ] `src/anomaly/mahalanobis.hpp` — distance from the normal cloud
+- [ ] `src/anomaly/evaluate.hpp` — ROC-AUC, PR-AUC, precision@k
+- [ ] `test/anomaly_test.cpp`
+
+ForgeFP usage: `fp::Rng`, `fp::linalg` (`solve`, `dot`), `fp::sort_by_cached`,
+`fp::views::chunk`.
+
+Gate: planted anomalies are ranked first (AUCs well above chance) by all three
+detectors; thresholds derive from contamination or a chi-square quantile.
+
+### E20 — Online learning and drift (after Stage 4)
+
+Spec: [online.md](online.md).
+
+Files:
+
+- [ ] `src/online/welford.hpp` — running mean/variance, mergeable
+- [ ] `src/online/incremental.hpp` — `partial_fit` protocol, online scaler
+- [ ] `src/online/drift.hpp` — PSI, Page–Hinkley, ADWIN-lite
+- [ ] `src/online/evaluate.hpp` — prequential evaluation
+- [ ] `test/online_test.cpp`
+
+ForgeFP usage: `fp::map2d`, `fp::inplace`, `fp::views::window`,
+`fp::linalg` (`mean`, `variance`).
+
+Gate: Welford matches two-pass statistics and merges exactly; `partial_fit`
+converges to the batch solution; drift is detected within the documented
+budget and stationary streams do not fire; prequential evaluation never leaks
+a label.
+
+### E21 — LLM evaluation harness (after Stage 14)
+
+Spec: [llm-eval.md](llm-eval.md).
+
+Files:
+
+- [ ] `src/llm/eval.hpp` — perplexity (KV-cached), the JSON/markdown report
+- [ ] `src/llm/fewshot.hpp` — prompt assembly, k-shot selection, deterministic generation
+- [ ] `src/llm/text_metrics.hpp` — exact match, token F1, BLEU-lite, ROUGE-lite, MCQ scoring
+- [ ] `src/llm/contamination.hpp` — 13-gram overlap check
+- [ ] `test/llm_eval_test.cpp`
+
+ForgeFP usage: `fp::numerics` (`logsumexp`), `fp::str`, `fp::Rng`,
+`fp::sort_by_cached`, `fp::views::chunk`.
+
+Gate: every metric matches a hand-computed example; the harness is
+deterministic for a seed; MCQ scoring is length-normalized; the contamination
+check flags an overlapping document and passes a clean one.
+
+## Remaining gaps (audited)
+
+Everything above is *specified*. This table is the honesty check: what is not
+in the stack, and why — so the boundary is a decision, not an oversight.
+
+| Area | Status | Disposition |
+|---|---|---|
+| Reverse-mode autodiff (general tape) | `nn`/`llm` have bespoke backprop; fp has forward-mode only | **Keep bespoke** (the tape is the models' engine); revisit only if a third consumer appears |
+| Mixed precision (fp16/bf16) | excluded until fp has a half type | future work in **ForgeFP**; int8/int4 covered by [inference.md](inference.md) |
+| Distributed training | non-goal | sketch only: data-parallel with gradient averaging; no dependency-free all-reduce exists, so no code |
+| Vendor-kernel GEMM/conv | non-goal | escalate to fp as an opt-in BLAS backend if a budget needs it ([performance.md](performance.md)) |
+| Graph neural networks | **specified** | [gnn.md](gnn.md) — E15 |
+| Bayesian optimization / AutoML | **specified** | [bayesopt.md](bayesopt.md) — E16 |
+| Active learning | **specified** | [active.md](active.md) — E17 |
+| Semi-/self-supervised learning | **specified** | [semi.md](semi.md) — E18 |
+| Anomaly detection | **specified** (LOF + isolation forest + one-class SVM + Mahalanobis) | [anomaly.md](anomaly.md) — E19 |
+| Online learning / drift detection | **specified** | [online.md](online.md) — E20 |
+| LLM evaluation harness | **specified** | [llm-eval.md](llm-eval.md) — E21 |
+| Reproducibility contract | rules scattered | folded into [conventions.md](conventions.md#determinism) (bit-exact vs tolerance) |
+| Causal inference, survival analysis | missing | **non-goal**, declared |
+| Speech/audio, image codecs | missing | **non-goal** (external codecs); dsio moves the bytes, nothing decodes them |
+| Serving (HTTP/gRPC), ONNX export | missing | **non-goal** |
+| Fairness / robustness / adversarial suites | missing | **non-goal**, declared |
+| Experiment tracking, data versioning | missing | **non-goal** (JSON logs + checkpoints cover the local case) |
+
 ## Milestones
 
 | Milestone | After stage | Passing condition |
@@ -404,6 +864,21 @@ dispatch, and tests.
 | M6 | 12 | CNN > 95% on synthetic images; LSTM learns a toy sequence |
 | M7 | 14 | Char GPT loss decreases; samples look like the corpus |
 | M8 | 15 | CPU and GPU training agree within tolerance; the suite passes without a device |
+| M9 | E4, E5 | k-means recovers planted blobs; PCA keeps ≥ 95% variance in two components |
+| M10 | E6 | A forest beats a single tree on planted noisy data; stacking beats its best base learner |
+| M11 | E8 | ARIMA beats the naive forecast on a planted AR(2) series; backtesting never leaks the future |
+| M12 | E10 | Cached decoding is bit-identical and faster; int8 stays within tolerance of fp32 |
+| M13 | E11 *(optional)* | Bandits converge to the best arm; Q-learning solves the test gridworld |
+| M14 | E12 | The PyTorch ratio table meets the budgets (≤ 2× classical, ≤ 3× deep CPU, ≤ 3× covered GPU kernels) |
+| M15 | E13 | REINFORCE, A2C, DQN and PPO solve their tasks; the isolation test passes |
+| M16 | E14 | The GPU coverage matrix is green; the suite passes with `FORGEML_DISABLE_GPU=1` |
+| M17 | E15 | A GCN classifies a planted community graph; permutation equivariance holds |
+| M18 | E16 | BO beats random search at an equal budget; the GP matches a hand-computed posterior |
+| M19 | E17 | Active learning reaches the target with fewer labels than random sampling |
+| M20 | E18 | Self-training and contrastive pre-training beat their supervised-only baselines |
+| M21 | E19 | Planted anomalies are ranked first by all three detectors (PR-AUC well above chance) |
+| M22 | E20 | Drift is detected within the documented budget; stationary streams do not fire |
+| M23 | E21 | Every LLM metric matches a hand-computed example; the harness is seed-reproducible |
 
 ## Effort guide
 
@@ -422,6 +897,22 @@ dispatch, and tests.
 | 13 | 3–5 days | 11, 12 |
 | 14 | 2–4 days | 13 |
 | 15 | 2–3 days | 4, 11–13 |
+| E1–E2 | 3 days | 2, 3 |
+| E3–E5 | 4–5 days | E2 |
+| E6–E7 | 3–4 days | 7, E3 |
+| E8–E9 | 3 days | E2, E3 |
+| E10 | 3–4 days | 14 |
+| E11 *(optional)* | 1–2 days | E3 |
+| E12 (performance) | 4–5 days, cross-cutting | 11 |
+| E13 (deep RL) | 3–4 days | E11, 11, 4 |
+| E14 (GPU depth) | 3–5 days | 15 |
+| E15 (GNN) | 3–4 days | 11, 4 |
+| E16 (BayesOpt) | 2–3 days | E12, E2 |
+| E17 (active) | 2 days | 9, E6 |
+| E18 (semi/self-supervised) | 3 days | 11, E3, E1 |
+| E19 (anomaly) | 2 days | E3, 8 |
+| E20 (online/drift) | 2 days | 4, E2 |
+| E21 (LLM eval) | 2 days | 14 |
 
 The estimates are lower than the original plan because ForgeFP already provides
 linear algebra, numerics, randomness, serialization, autodiff, and the

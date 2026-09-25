@@ -2,3 +2,4 @@ build/
 lib/
 compile_commands.json
 conanfile.txt
+CMakePresets.json

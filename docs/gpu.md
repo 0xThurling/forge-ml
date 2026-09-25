@@ -64,6 +64,61 @@ Two consequences worth stating up front:
   allocate a partials buffer per call and lose to the CPU by 12× at 4M elements
   (fp/GPU.md). The metrics/loss paths own one scratch per thread.
 
+## Coverage matrix
+
+Every operation in the stack has a stated disposition — no silent gaps. This
+table is the completeness contract for the opt-in tier: an operation is either
+device-covered, deliberately CPU (with the reason), or listed as future work.
+
+| Operation | Device path | Disposition |
+|---|---|---|
+| Dense forward/backward | `fp::gpu::matmul` | device-covered |
+| Batched attention scores | `batched_matmul`, `transpose` | device-covered |
+| Softmax (row-wise) | `softmax_rows_wg` | device-covered |
+| Causal mask, dropout mask | `transform_inplace_indexed`, `transform_inplace` | device-covered (fused) |
+| Optimizer steps (GD/SGD/Adam/AdamW) | `axpy_inplace`, `zip*_transform_inplace` | device-covered |
+| Elementwise losses/activations | `transform_inplace`, `map_to` | device-covered |
+| Reductions (mean/var/norm), metrics | `reduce`, `dot`, `row_means`, `col_sums` | device-covered (Scratch required) |
+| Scaling/statistics | `row_means`, `add_row_broadcast` | device-covered |
+| LayerNorm/RMSNorm | `row_means`, `add_row_broadcast`, `transform_inplace` | device-covered |
+| Embedding lookup | — | **CPU** (gather is memory-bound; revisit with a kernel) |
+| Convolution (im2col + GEMM) | `matmul` on the im2col buffer | device-covered via GEMM; a direct kernel is future work |
+| Recurrent cells (LSTM/GRU) | `matmul` per gate | device-covered; fused kernel future work |
+| Tokenizer, tree/ensemble/classical models | — | **CPU** (small tensors; launch costs dominate) |
+| Sorting, argmax, top-k | — | **CPU** (revisit for large-vocabulary decoding) |
+| KV cache | `matmul` for the attention update | device-resident buffers; cache management on the host |
+| Quantized matmul | — | **CPU** today; `inference/quantize.hpp` is device-agnostic by design |
+
+Two rules follow:
+
+- **Every device path has a CPU reference and a tolerance.** The matrix lists
+  *where* the work runs, not an excuse to skip a comparison.
+- **A new op starts as CPU** and moves to the matrix only with a measured
+  crossover (the table above) and a test that compares against the CPU.
+
+## Opt-in mechanics
+
+Three switches, in order of precedence — the tier never turns itself on:
+
+1. **Build**: a SYCL 2020 toolchain makes the device code compile (fp's own
+   rule; without one `fp::gpu` falls back to the CPU and nothing in ml
+   changes).
+2. **Runtime probe**: `ml/gpu/dispatch.hpp::available()` is called once and
+   cached; `should_use(n)` decides per operation from the measured crossovers.
+3. **Override**: `FORGEML_DISABLE_GPU=1` forces the CPU path for tests and CI,
+   and `FORGEML_GPU_THRESHOLD_SCALE=<x>` shifts every crossover by a factor so
+   a slow device can be accommodated without rebuilding.
+
+Determinism rules:
+
+- Elementwise kernels are **bit-identical** to the CPU (the same expression
+  order).
+- `matmul`, reductions and softmax are compared with `fp::approx_equal` and a
+  documented tolerance; a device reduction may reorder, so "same seed, same
+  bits" is *not* promised there.
+- Tests always run the CPU path; device tests are additive and skipped
+  (never failed) when no device is present.
+
 ## Device residency
 
 Two options were considered:
@@ -95,6 +150,52 @@ Rules for residency:
   pageable `from_host` for small batches). The dataset stays on the host.
 - **Scalars cross once per step**: a loss/metric is `reduce`d on the device and
   read back into a `HostBuffer` (4–8 bytes), not per-element.
+
+## Data loading (the transfer side)
+
+This document covers *compute* on the device; the bytes still have to get
+there. Loading is dsio's job, and it has the same two-path shape:
+
+1. **Host staging → device copy** (default, works everywhere): dsio streams
+   batches into host memory, ml uploads them into `fp::gpu::Buffer`s (pinned
+   `HostBuffer` for the staging side). This is what runs on WSL2 and without
+   GPUDirect.
+2. **GPUDirect Storage (cuFile)**: with a `DSIO_WITH_CUFILE` build, an NVIDIA
+   GPU and `nvidia-fs`, `dsio::open_device_sink()` hands out device memory and
+   `dsio::read_into()` DMA-reads from the NVMe into it — the host is out of
+   the path. `dsio::gpu_direct_available()` reports availability; otherwise
+   the host path is used and `open_device_sink()` says what is missing.
+
+Shard layout rules (shard size, one stream per device, batch sizes) are in
+[data.md](data.md#disk-backed-datasets-dsio); the API is in
+[`dsio/docs/usage.md`](../../dsio/docs/usage.md); the *why* is
+[loading.md](loading.md) (Lesson 7 covers this section's two paths).
+
+## Overlap and memory
+
+A device step that waits for its batch is a wasted step. The rules:
+
+- **Double-buffer the staging**: while step `n` computes, the loader fills the
+  pinned buffer for step `n+1` (dsio's `prefetch` already reads ahead; the
+  copy into the pinned `HostBuffer` is what must overlap).
+- **Pin once, reuse always**: `HostBuffer`s and `fp::gpu::Buffer`s are
+  allocated at fit time, never per step.
+- **Account for device memory**: parameters + optimizer states (Adam stores
+  two moments) + activations + KV cache + one batch buffer. `perf/memory.hpp`
+  reports it; a model that does not fit is a configuration error, not an
+  out-of-memory surprise.
+- **KV cache** is pre-allocated to `max_seq` (`inference/kv_cache.hpp`); a
+  sliding window is the documented way to bound it.
+- **Checkpointing** is the only routine host round-trip after warm-up
+  (`to_host()` per parameter, `llm/checkpoint.hpp`).
+
+## Performance targets
+
+The opt-in tier is held to the budgets in
+[performance.md](performance.md#what-pytorch-level-means-here): covered kernels
+within **3× of PyTorch CUDA** on the reference RTX 3060, measured on the same
+shapes with `bench/compare/kernels_cuda.py`. Below the crossovers the CPU path
+wins, and that is the documented result — not a failure.
 
 ## API sketch
 

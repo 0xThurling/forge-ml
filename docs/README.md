@@ -29,19 +29,43 @@ with an acceptance gate.
 - Zero-cost by construction: hot paths use `fp::inplace`, `fp::simd`, and
   `fp::par_for`, so the functional style does not cost performance.
 
-## Non-goals
+## Goals and non-goals
 
-- Distributed training and mixed precision (documented as future work).
-- Competing with PyTorch on performance; the target is clarity plus
-  cache-friendly loops.
+**Goals**: a complete classical stack, a deep-learning stack up to a
+transformer, LLM training and inference, probability and statistics, time
+series, recommenders, an optional RL tier — and **PyTorch-class performance**
+on defined workloads, measured and gated ([performance.md](performance.md)).
+The coverage map below is the checklist.
+
+**Non-goals** (declared, not forgotten — the audit in
+[roadmap.md](roadmap.md#remaining-gaps-audited) lists each with its
+disposition):
+
+- Distributed training, and mixed precision until ForgeFP has a half type
+  (int8/int4 quantization is covered by [inference.md](inference.md)).
+- Vendor-kernel-level GEMM/conv (BLAS/cuBLAS/cuDNN): hand kernels target
+  end-to-end parity; a gap that needs a vendor kernel is escalated to ForgeFP
+  as an opt-in backend, never added to `ml/`.
+- Causal inference, survival analysis, speech/audio and image codecs, serving
+  (HTTP/gRPC) and ONNX export, fairness/robustness suites, experiment tracking
+  and data versioning.
 - Reimplementing anything ForgeFP already provides (linear algebra, RNG,
   serialization, autodiff, arenas, stopwatches).
 
-GPU acceleration is **opt-in, not a non-goal**: ForgeFP's SYCL tier
-(`fp/gpu.hpp`) covers the kernels this stack needs, and [gpu.md](gpu.md)
-specifies which ForgeML operations use it, where data crosses the bus, and how
-the device path is tested against the CPU reference. Small models stay on the
-CPU by design — the measured crossovers are in
+## The tiers
+
+| Tier | Rule |
+|---|---|
+| Core | always on, always tested, CPU-first |
+| GPU — [gpu.md](gpu.md) | **opt-in**: build flag, runtime probe, coverage matrix, `FORGEML_DISABLE_GPU=1`; the CPU path is the reference |
+| RL — [rl.md](rl.md) | **optional and isolated**: nothing imports `rl/`; its tests and benchmarks are separate |
+| Performance — [performance.md](performance.md) | cross-cutting program: precision policy, benchmark harness, PyTorch ratio table, budgets, regression gates |
+
+GPU acceleration is opt-in, not a non-goal: ForgeFP's SYCL tier
+(`fp/gpu.hpp`) covers the kernels, and [gpu.md](gpu.md) specifies exactly which
+operations use it, what the fallback is, and how the device path is tested
+against the CPU reference. Small models stay on the CPU by design — the
+measured crossovers are in
 [`fp/GPU.md`](../../fp/GPU.md#measured-crossovers-rtx-3060-wsl2).
 
 ## What ForgeFP provides (do not reimplement)
@@ -66,21 +90,75 @@ CPU by design — the measured crossovers are in
 | Forward-mode AD | `autodiff.hpp` *(opt-in)* | `Dual`, `fp::ad::*`, `derivative` |
 | Named operators | `ops.hpp` | `plus`, `times`, `abs`, `sqrt`, `exp`, `log`, `min_`, `max_`, `pow`, `clamp` |
 
+**Disk-backed data is not ForgeFP's job.** Shards, streaming reads and the
+GPUDirect seam live in **dsio**, the sibling storage project. ml uses it for
+datasets larger than RAM — see
+[data.md](data.md#disk-backed-datasets-dsio) for the CPU and GPU loading paths,
+[loading.md](loading.md) for the guided lesson, and
+[`dsio/docs/ml-integration.md`](../../dsio/docs/ml-integration.md) for the
+wiring plan.
+
 ## What ForgeML provides (the domain)
 
 | Layer | Contents |
 |---|---|
 | `core/` | `Shape`, `Vector`, `Matrix` (grid-backed), `Tensor` |
 | `math/` | ML-specific activations (`gelu`, `leaky_relu`), losses, impurity/statistics |
-| `data/` | datasets, splits, scaling, encoding, batching |
+| `features/` | imputation, encoding extensions, binning, polynomial/interaction features, text features (BoW/TF-IDF), feature selection, imbalance handling, augmentation — [features.md](features.md) |
+| `data/` | datasets, splits, scaling, encoding, batching; disk-backed streams via **dsio** |
+| `prob/` | distributions, information theory, Bayesian updates, sampling, bootstrap, statistical tests — [probability.md](probability.md) |
 | `metrics/` | regression/classification metrics, confusion matrix |
+| `interpret/` | permutation importance, partial dependence/ICE, calibration, ROC/PR curves, learning curves — [interpret.md](interpret.md) |
+| `model/` | linear/logistic regression, Gaussian NB, CART, linear SVM |
+| `neighbors/` | k-NN, kernel density estimation, local outlier factor — [neighbors.md](neighbors.md) |
+| `cluster/` | k-means, GMM/EM, DBSCAN, agglomerative clustering, cluster metrics — [clustering.md](clustering.md) |
+| `reduce/` | PCA, kernel PCA, LDA, random projections, NMF — [reduction.md](reduction.md) |
+| `ensemble/` | bagging, random forest, AdaBoost, gradient boosting, stacking/voting — [ensembles.md](ensembles.md) |
+| `timeseries/` | windowing, ARIMA, exponential smoothing, backtesting — [timeseries.md](timeseries.md) |
+| `recsys/` | matrix factorization (ALS/SGD), ranking metrics — [recommend.md](recommend.md) |
 | `optim/` | optimizer interface, GD, SGD, Adam/AdamW, LR schedules |
-| `model/` | model interfaces + linear/logistic regression, Gaussian NB, CART, linear SVM |
-| `eval/` | scoring adapters, k-fold CV, grid search |
+| `eval/` | scoring adapters, k-fold CV, grid/random search, learning curves |
 | `utils/` | assertions, logging, checkpoint schema, gradient-check harness |
 | `nn/` | parameters, layers, sequential network, CNN/RNN/LSTM/embedding/attention/transformers |
-| `llm/` | tokenizer, LM dataset, causal LM, trainer, sampling, checkpoints |
-| `gpu/` *(opt-in)* | device tensors, device optimizer/linear/attention, dispatch thresholds — see [gpu.md](gpu.md) |
+| `llm/` | tokenizer, LM dataset, causal LM, trainer, sampling, checkpoints; evaluation harness — [llm-eval.md](llm-eval.md) |
+| `inference/` | KV cache, sampling strategies, quantization, batched decoding, fine-tuning (LoRA) — [inference.md](inference.md) |
+| `gpu/` *(opt-in)* | device tensors, device optimizer/linear/attention, dispatch thresholds, coverage matrix — [gpu.md](gpu.md) |
+| `rl/` *(optional tier)* | bandits, tabular Q/SARSA/TD(0), deep RL (REINFORCE/A2C/DQN/PPO) — [rl.md](rl.md) |
+| `perf/` *(tooling)* | phase timers, allocation counters, memory accounting; the benchmark and PyTorch-comparison program — [performance.md](performance.md) |
+| `gnn/` | message passing, GCN/GAT, graph batching and pooling — [gnn.md](gnn.md) |
+| `bayesopt/` | GP surrogate, acquisition functions, the search loop — [bayesopt.md](bayesopt.md) |
+| `active/` | uncertainty/committee/diversity queries, label-budget loop — [active.md](active.md) |
+| `semi/` | self-training, label propagation, contrastive (InfoNCE) — [semi.md](semi.md) |
+| `anomaly/` | isolation forest, one-class SVM, Mahalanobis, ranking metrics — [anomaly.md](anomaly.md) |
+| `online/` | running statistics, `partial_fit`, drift detection, prequential evaluation — [online.md](online.md) |
+
+### Coverage map
+
+| Domain | Where |
+|---|---|
+| Supervised learning (linear, logistic, NB, trees, SVM, k-NN, ensembles) | `model/`, `neighbors/`, `ensemble/` |
+| Unsupervised learning (clustering, dimensionality reduction, density, outliers) | `cluster/`, `reduce/`, `neighbors/` |
+| Feature engineering and data preparation | `features/`, `data/` |
+| Probability, statistics, information theory | `prob/` |
+| Model evaluation and interpretation | `metrics/`, `eval/`, `interpret/` |
+| Deep learning (MLP → CNN/RNN → attention → transformer) | `nn/` |
+| Large language models (training and inference) | `llm/`, `inference/` |
+| Time series | `timeseries/` |
+| Recommender systems | `recsys/` |
+| Reinforcement learning | `rl/` *(optional tier)* |
+| Performance engineering (PyTorch-class targets, precision, profiling) | [performance.md](performance.md) |
+| GPU acceleration (opt-in, coverage matrix, fallback) | [gpu.md](gpu.md) |
+| Graphs and message passing | `gnn/` |
+| Hyperparameter search / AutoML | `eval/` + `bayesopt/` |
+| Active learning | `active/` |
+| Semi- and self-supervised learning | `semi/` |
+| Anomaly detection | `neighbors/`, `anomaly/` |
+| Streaming and online learning | `online/` |
+| LLM evaluation | `llm/` ([llm-eval.md](llm-eval.md)) |
+
+Nothing above is a new dependency: every module is specified to consume ForgeFP
+(`fp::Rng`, `fp::linalg`, `fp::grid`, `fp::numerics`, `fp::views`,
+`fp::Validation`, `fp::Buffer`, …) exactly like the existing layers.
 
 ## Architecture principles
 

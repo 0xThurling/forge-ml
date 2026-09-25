@@ -322,6 +322,54 @@ Tests (`test/dataloader_test.cpp`):
 
 ---
 
+## Disk-backed datasets (dsio)
+
+`Dataset<Y>` and `DataLoader<Y>` above are **in-memory**: they own `Matrix` /
+`Vector` storage. Datasets larger than RAM — LLM token streams, large shards —
+come from **dsio**, the sibling storage library: a shard set plus a streaming
+reader built on O_DIRECT and io_uring. The wiring plan is
+[`dsio/docs/ml-integration.md`](../../dsio/docs/ml-integration.md); the API
+reference is [`dsio/docs/usage.md`](../../dsio/docs/usage.md).
+
+**New to this?** [loading.md](loading.md) is a guided lesson: why O_DIRECT and
+alignment exist, how queue depth turns latency into bandwidth, why shard size
+is the biggest knob on this machine, and how the GPU paths differ — with
+experiments to run and checkpoints.
+
+### CPU
+
+- A dataset on disk is a `dsio::ShardSet` — a TSV manifest of
+  `path<TAB>offset<TAB>length`, one shard per file (or a range inside one).
+- `dsio::for_each_batch(shards, options, callback)` streams the shards as one
+  continuous byte stream, `prefetch` batches ahead, with a seeded shuffle of
+  the shard order. ml wraps it in `ShardStream<T>` (fixed-size records, see the
+  plan) and copies each batch into ml storage.
+- Layout rules that matter on the reference machine (WSL2): shards of
+  **512 MiB–1 GiB** (the vhdx ramps with contiguous run length: 32 MiB shards
+  ≈ 2–3 GiB/s, 1 GiB shards ≈ 6.2 GiB/s), **one reader stream** (concurrency
+  dilutes the ramp), batches ≥ 1 MiB. Record-level shuffling stays in ml; dsio
+  only shuffles shard order.
+
+### GPU
+
+Two paths, one API:
+
+1. **Host staging → device copy** — works everywhere, including the CPU
+   fallback: dsio fills host batches; ml copies them into device buffers with
+   the `fp::gpu` tier (`fp::gpu::Buffer`, pinned `HostBuffer`; see
+   [gpu.md](gpu.md)). This is the path that runs on WSL2 and on machines
+   without GPUDirect.
+2. **GPUDirect Storage (cuFile)** — a `DSIO_WITH_CUFILE` build plus an NVIDIA
+   GPU with `nvidia-fs` lets `dsio::open_device_sink()` hand out device memory
+   and `dsio::read_into()` DMA straight from the NVMe into it, with no host
+   bounce buffer. `dsio::gpu_direct_available()` reports whether the
+   build/driver allow it; without it `open_device_sink()` explains what is
+   missing and the host path is used. The extension point is `dsio::Sink`
+   (`region` / `kind` / `alignment` / `commit`).
+
+The split of concerns: **`fp::gpu` computes on the device; dsio's sink is how
+the bytes get there.** A fully device-resident pipeline needs both.
+
 ## Cross-cutting notes
 
 - Index vectors are `std::vector<std::size_t>`; splits and loaders pass them

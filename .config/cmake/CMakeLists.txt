@@ -8,6 +8,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # --- Project Target ---
 file(GLOB_RECURSE SOURCES RELATIVE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src/*.cpp)
-add_executable(ml ${SOURCES})
+list(FILTER SOURCES EXCLUDE REGEX "/(build|build-[^/]*|CMakeFiles)/")
+if(SOURCES)
+  add_executable(ml ${SOURCES})
+else()
+  message(WARNING "No source files found in src/. Executable target 'ml' was not created.")
+endif()
 
 

@@ -1,124 +1,76 @@
 #pragma once
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <numeric>
+#include <forgefp/fp/adt.hpp>
+#include <forgefp/fp/ops.hpp>
+#include <forgefp/fp/ranges.hpp>
+#include <forgefp/fp/result.hpp>
+#include <forgefp/fp/simd.hpp>
+#include <forgefp/fp/string.hpp>
+#include <forgefp/fp/vec.hpp>
 #include <ostream>
-#include <stdexcept>
+#include <string>
 #include <vector>
 
-#define M_PI 3.14159265358979323846 /* pi */
+namespace forgeml {
+using Vector = std::vector<double>;
 
-class Vector {
-public:
-  using value_type = double;
+inline constexpr double pi = 3.14159265358979323846;
 
-  explicit Vector(std::vector<double> components)
-      : _components(std::move(components)) {}
+inline std::string dim_error(std::size_t a, std::size_t b) {
+  return "dimension mismatch" + std::to_string(a) + " vs" + std::to_string(b);
+}
 
-  std::size_t dim() const noexcept { return _components.size(); }
+inline fp::Result<Vector> add(Vector const &a, Vector const &b) {
+  if (a.size() != b.size())
+    return fp::fail(dim_error(a.size(), b.size()));
+  return fp::ok(fp::zip_with(a, b, fp::plus));
+}
 
-  Vector operator+(const Vector &other) const {
-    check_same_dim(other);
-    std::vector<value_type> result;
+inline fp::Result<Vector> sub(Vector const &a, Vector const &b) {
+  if (a.size() != b.size())
+    return fp::fail(dim_error(a.size(), b.size()));
+  return fp::ok(fp::zip_with(a, b, fp::minus));
+}
 
-    result.reserve(dim());
+inline Vector scale(Vector const &v, double factor) {
+  return fp::map(v, fp::times(factor));
+}
 
-    for (std::size_t i = 0; i < dim(); ++i) {
-      result.push_back(_components[i] + other._components[i]);
-    }
+inline fp::Result<double> dot(Vector const &a, Vector const &b) {
+  if (a.size() != b.size())
+    return fp::fail(dim_error(a.size(), b.size()));
+  return fp::ok(fp::dot(a, b));
+}
 
-    return Vector(std::move(result));
-  }
+inline double magnitude(Vector const &v) { return std::sqrt(fp::dot(v, v)); }
 
-  Vector operator-(const Vector &other) const {
-    check_same_dim(other);
-    std::vector<value_type> result;
-    result.reserve(dim());
+inline fp::Result<double> cosine_similarity(Vector const &a, Vector const &b) {
+  if (a.size() != b.size())
+    return fp::fail(dim_error(a.size(), b.size()));
 
-    for (std::size_t i = 0; i < dim(); ++i) {
-      result.push_back(_components[i] - other._components[i]);
-    }
+  const double denom = magnitude(a) * magnitude(b);
 
-    return Vector(std::move(result));
-  }
+  if (denom == 0.0)
+    return fp::fail("cosine similarity undefined for zero vector");
 
-  value_type operator[](std::size_t i) const { return _components[i]; }
+  return fp::ok(fp::dot(a, b) / denom);
+}
 
-  value_type &operator[](std::size_t i) { return _components[i]; }
+inline fp::Result<double> angle_degrees(Vector const &a, Vector const &b) {
+  return fp::map(cosine_similarity(a, b), [](double cosine) {
+    const double clamped =
+        fp::cond(cosine, fp::when(fp::lt(-1.0), [](double) { return -1.0; }),
+                 fp::when(fp::gt(1.0), [](double) { return 1.0; }),
+                 fp::otherwise([](double value) { return value; }));
+    return std::acos(clamped) * (180.0 / pi);
+  });
+}
 
-  value_type dot(const Vector &other) const {
-    check_same_dim(other);
-    return std::inner_product(_components.begin(), _components.end(),
-                              other._components.begin(), value_type{0});
-  }
+inline Vector zeros(std::size_t n) { return fp::replicate(n, 0.0); }
 
-  value_type magnitude() const {
-    value_type sum_sq = 0;
-    for (auto x : _components) {
-      sum_sq += x * x;
-    }
-
-    return std::sqrt(sum_sq);
-  }
-
-  value_type angle_degrees(const Vector &b) {
-    const double na = magnitude();
-    const double nb = b.magnitude();
-
-    const double denom = na * nb;
-    double c = dot(b) / denom;
-    c = std::max(-1.0, std::min(1.0, c));
-    double radians = std::acos(c);
-    return radians * (180 / M_PI);
-  }
-
-  Vector normalize() const {
-    auto mag = magnitude();
-    if (mag == value_type{0}) {
-      throw std::runtime_error("cannot normalise zero vector");
-    }
-
-    std::vector<value_type> result;
-    result.reserve(dim());
-    for (auto x : _components) {
-      result.push_back(x / mag);
-    }
-    return Vector(std::move(result));
-  }
-
-  const std::vector<value_type> &components() const noexcept {
-    return _components;
-  }
-
-  value_type cosine_similarity(const Vector &other) const {
-    auto denom = magnitude() * other.magnitude();
-
-    if (denom == value_type{0}) {
-      throw std::runtime_error("cosine similarity undefined for zero vector");
-    }
-
-    return dot(other) / denom;
-  }
-
-  friend std::ostream &operator<<(std::ostream &os, const Vector &v) {
-    os << "Vector([";
-    for (std::size_t i = 0; i < v.dim(); ++i) {
-      os << v._components[i];
-      if (i + 1 < v.dim())
-        os << ", ";
-    }
-    os << "])";
-    return os;
-  }
-
-private:
-  std::vector<value_type> _components;
-
-  void check_same_dim(const Vector &other) const {
-    if (dim() != other.dim()) {
-      throw std::runtime_error("dimension mismatch");
-    }
-  }
-};
+inline std::ostream &operator<<(std::ostream &os, Vector const &v) {
+  return os << "Vector([" << fp::str::join(v, ", ") << "])";
+}
+} // namespace forgeml

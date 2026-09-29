@@ -6,6 +6,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
       
 
+include(FetchContent)
+
+# --- Dependencies ---
+FetchContent_Declare(forgefp SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../fp")
+FetchContent_MakeAvailable(forgefp)
+
+
+# --- Build Flags ---
+set(CMAKE_CXX_COMPILER_LAUNCHER ccache)
+set(CMAKE_C_COMPILER_LAUNCHER ccache)
+find_package(Threads REQUIRED)
+link_libraries(Threads::Threads)
+add_compile_options("$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall>")
+add_compile_options("$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wextra>")
+add_compile_options("$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wpedantic>")
+add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/W4>")
+
+
 # --- Project Target ---
 file(GLOB_RECURSE SOURCES RELATIVE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src/*.cpp)
 list(FILTER SOURCES EXCLUDE REGEX "/(build|build-[^/]*|CMakeFiles)/")
@@ -13,6 +31,61 @@ if(SOURCES)
   add_executable(ml ${SOURCES})
 else()
   message(WARNING "No source files found in src/. Executable target 'ml' was not created.")
+endif()
+
+
+
+# --- Linking ---
+if(SOURCES)
+  target_link_libraries(ml PRIVATE forgefp)
+elseif(TARGET ml)
+  target_link_libraries(ml INTERFACE forgefp)
+endif()
+      
+
+# --- Testing and benchmarks ---
+# Only the top-level project builds these; a consumer of this project
+# does not build (or fetch a framework for) another project's tests.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR OR FORGE_BUILD_DEPENDENCY_TESTS)
+  enable_testing()
+  include(FetchContent)
+  set(FETCHCONTENT_SOURCE_DIR_GOOGLETEST "/home/jacques/.cache/forge/deps/googletest-4849be21" CACHE PATH "" FORCE)
+  FetchContent_Declare(googletest GIT_REPOSITORY "https://github.com/google/googletest.git" GIT_TAG "v1.14.0")
+  FetchContent_MakeAvailable(googletest)
+  include(GoogleTest)
+  file(GLOB_RECURSE TEST_SOURCES "${PROJECT_SOURCE_DIR}/test/*.cpp")
+  list(FILTER TEST_SOURCES EXCLUDE REGEX "/(build|build-[^/]*|CMakeFiles)/")
+
+  # Build list of sources WITHOUT src/main.cpp (to avoid multiple main)
+  file(GLOB_RECURSE APP_SOURCES "${PROJECT_SOURCE_DIR}/src/*.cpp")
+  list(FILTER APP_SOURCES EXCLUDE REGEX "/(build|build-[^/]*|CMakeFiles)/")
+  list(FILTER APP_SOURCES EXCLUDE REGEX ".*main\\.cpp$")
+
+  add_executable(${PROJECT_NAME}_tests ${TEST_SOURCES} ${APP_SOURCES})
+  target_include_directories(${PROJECT_NAME}_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(${PROJECT_NAME}_tests PUBLIC GTest::gtest_main forgefp)
+  gtest_discover_tests(${PROJECT_NAME}_tests)
+
+  # --- Benchmarks ---
+  FetchContent_Declare(googlebenchmark
+    GIT_REPOSITORY "https://github.com/google/benchmark.git"
+    GIT_TAG "v1.8.3")
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googlebenchmark)
+
+  file(GLOB_RECURSE BENCH_SOURCES "${PROJECT_SOURCE_DIR}/bench/*.cpp")
+  if(BENCH_SOURCES)
+    add_executable(${PROJECT_NAME}_bench ${BENCH_SOURCES})
+    target_link_libraries(${PROJECT_NAME}_bench PRIVATE benchmark::benchmark forgefp)
+    target_include_directories(${PROJECT_NAME}_bench PRIVATE
+      ${PROJECT_SOURCE_DIR}/src
+      ${PROJECT_SOURCE_DIR}/include)
+  endif()
+
 endif()
 
 

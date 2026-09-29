@@ -1,18 +1,34 @@
 return {
-  project = {
-    name = "ml",
-    type = "executable",
-    standard = "20",
-    
-  },
-  testing = false,
-  dependencies = {
-   direct = {},
-   conan = {}
-  },
-  resources = {
-    files = {}
-  },
-  scripts = {},
-  features = {}
+    project = {
+        name = "ml",
+        type = "executable",
+        standard = "20",
+    },
+    testing = {
+        enabled = true,
+        framework = "gtest",
+        benchmark = true,
+    },
+    dependencies = {
+        direct = {
+            forgefp = {
+                path = "../fp",
+                target = "forgefp",
+            },
+            googletest = {
+                git = "https://github.com/google/googletest.git",
+                tag = "v1.14.0",
+            },
+        },
+        conan = {},
+    },
+    build = {
+        presets = { "warnings", "concurrency" },
+    },
+    resources = {
+        files = {},
+    },
+    scripts = {},
+    features = {
+    },
 }

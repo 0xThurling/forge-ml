@@ -2,7 +2,7 @@ return {
     project = {
         name = "ml",
         type = "executable",
-        standard = "20",
+        standard = "23",
     },
     testing = {
         enabled = true,

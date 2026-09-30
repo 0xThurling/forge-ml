@@ -61,8 +61,8 @@ inline fp::Result<double> cosine_similarity(Vector const &a, Vector const &b) {
 inline fp::Result<double> angle_degrees(Vector const &a, Vector const &b) {
   return fp::map(cosine_similarity(a, b), [](double cosine) {
     const double clamped =
-        fp::cond(cosine, fp::when(fp::lt(-1.0), [](double) { return -1.0; }),
-                 fp::when(fp::gt(1.0), [](double) { return 1.0; }),
+        fp::cond(cosine, fp::arm(fp::below(-1.0), [](double) { return -1.0; }),
+                 fp::arm(fp::above(1.0), [](double) { return 1.0; }),
                  fp::otherwise([](double value) { return value; }));
     return std::acos(clamped) * (180.0 / pi);
   });

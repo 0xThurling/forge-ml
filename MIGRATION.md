@@ -10,8 +10,10 @@ Verification performed while producing this document:
 - a dump of every vector / matrix / linalg operation (add, sub, dot, magnitude,
   normalize, cosine, angle, matmul, matvec, scale, transpose, determinant,
   inverse, eigenvalues, eigenvector, identity/rotation/scale/shear factories,
-  linear independence, projection, Gram-Schmidt) is **byte-identical** to the
-  original classes' output;
+  linear independence, projection, Gram-Schmidt) matches the original classes'
+  output **except where the bug list records an intentional math fix**
+  (`inverse_2x2`, `eigenvalues_2x2`, `rotation_2d`, the matrix shape checks,
+  and the complex-eigenvalue rejection in `eigenvector_2x2`);
 - the error paths were exercised: dimension mismatch, zero-vector normalize,
   singular inverse, ragged-matrix validation (all bad rows reported at once),
   matrix/vector mismatch;
@@ -23,11 +25,11 @@ Verification performed while producing this document:
 
 | Module | Where / why |
 |---|---|
-| `adt.hpp` | `cond`/`when`/`otherwise` for clamping in `angle_degrees` and `relu`, `value_or` in Gram-Schmidt |
+| `adt.hpp` | `cond`/`arm`/`otherwise` for clamping in `angle_degrees` and `relu`, `value_or` in Gram-Schmidt |
 | `combinators.hpp` | `fix` for the autodiff topological-sort DFS |
 | `grid.hpp` | `transpose`, `map2d` (scalar multiply), `tabulate` (identity) |
 | `ops.hpp` | `plus`, `minus`, `times`, `lt`, `gt` |
-| `ranges.hpp` | `map`, `filter`, `filter_map`, `flat_map`, `fold_left`, `range`, `drop`, `enumerate`, `windows`, `concat`, `sum`, `all`, `find`, `reverse`, `zip` |
+| `ranges.hpp` | `map`, `filter`, `filter_map`, `flat_map`, `fold_left`, `range`, `drop`, `enumerate`, `windows`, `concat`, `sum`, `all`, `find_if`, `reverse`, `zip` |
 | `result.hpp` | `Result<T>`, `ok`, `fail`, `map`, `to_result` |
 | `simd.hpp` | `dot` for every vector / matrix product |
 | `string.hpp` | `join` for the `operator<<` of both types and error text |
@@ -55,26 +57,29 @@ small and sequential; `simd.hpp` pulls it in but nothing links it),
 | parameter flattening | `fp::flat_map` |
 | forward pass loops | `fp::fold_left` (neuron), `fp::map` (layer), `fp::fold_left` (MLP) |
 | autodiff DFS | `fp::fix` |
-| ReLU value | `fp::cond` / `fp::when` / `fp::otherwise` |
+| ReLU value | `fp::cond` / `fp::arm` / `fp::otherwise` |
 | random weights | `fp::map(fp::range(0, nin), ...)` |
 
 ## Bugs found in the original (read this before copying)
 
-The migration preserves original behaviour except where noted:
+The migration fixes the bugs below; all other behaviour is preserved:
 
 1. **Fixed:** `numerical_gradient` used `points_minus[i] += h`; it must be
    `-= h`. The migrated version fixes it (and the gradient is now correct).
 2. **Fixed by `fp::transpose`:** `Matrix::transpose` loops `j < rows()`
    instead of `j < cols()`, so non-square matrices are only partly transposed.
    The migrated `transpose` is the (correct) `fp::transpose`.
-3. **Preserved:** `Matrix::rotation_2d` returns `{{c, -s}, {s, -c}}` — the
-   last entry should be `c`; as written it is a reflection (det = -1).
-4. **Preserved:** `Matrix::inverse_2x2` returns `{{d, -b}, {c, -a}} / det`;
-   the correct inverse is `{{d, -b}, {-c, a}} / det`.
-5. **Preserved:** `Matrix::eigenvalues_2x2` uses `trace = a + b`; the trace is
-   `a + d`.
-6. **Preserved:** `Matrix::operator+` / `operator-` check
-   `rows*cols` equality, so a transposed shape is accepted.
+3. **Fixed:** `Matrix::rotation_2d` returned `{{c, -s}, {s, -c}}` — the last
+   entry should be `c`; as written it was a reflection (det = -1). The
+   migrated version returns the proper rotation `{{c, -s}, {s, c}}`.
+4. **Fixed:** `Matrix::inverse_2x2` returned `{{d, -b}, {c, -a}} / det`; the
+   correct inverse is `{{d, -b}, {-c, a}} / det`. The migrated version
+   returns the correct inverse.
+5. **Fixed:** `Matrix::eigenvalues_2x2` used `trace = a + b`; the trace is
+   `a + d`. The migrated version uses the correct trace.
+6. **Fixed:** `Matrix::operator+` / `operator-` compared `rows*cols`, so a
+   transposed shape was accepted; the migrated free functions require equal
+   rows and equal columns.
 7. **Fixed:** `Value::operator-` is now `const`; `Vector::angle_degrees` takes
    `const&` instead of a non-const receiver.
 
@@ -208,8 +213,8 @@ inline fp::Result<double> cosine_similarity(Vector const &a, Vector const &b) {
 inline fp::Result<double> angle_degrees(Vector const &a, Vector const &b) {
   return fp::map(cosine_similarity(a, b), [](double cosine) {
     const double clamped = fp::cond(
-        cosine, fp::when(fp::lt(-1.0), [](double) { return -1.0; }),
-        fp::when(fp::gt(1.0), [](double) { return 1.0; }),
+        cosine, fp::arm(fp::below(-1.0), [](double) { return -1.0; }),
+        fp::arm(fp::above(1.0), [](double) { return 1.0; }),
         fp::otherwise([](double value) { return value; }));
     return std::acos(clamped) * (180.0 / pi);
   });
@@ -305,7 +310,7 @@ inline Matrix scaled(Matrix const &m, double factor) {
 }
 
 inline fp::Result<Matrix> add(Matrix const &a, Matrix const &b) {
-  if (rows(a) * cols(a) != rows(b) * cols(b))
+  if (rows(a) != rows(b) || cols(a) != cols(b))
     return fp::fail("matrix/matrix dimension mismatch");
   return fp::ok(fp::zip_with(a, b, [](Vector const &x, Vector const &y) {
     return fp::zip_with(x, y, fp::plus);
@@ -313,7 +318,7 @@ inline fp::Result<Matrix> add(Matrix const &a, Matrix const &b) {
 }
 
 inline fp::Result<Matrix> sub(Matrix const &a, Matrix const &b) {
-  if (rows(a) * cols(a) != rows(b) * cols(b))
+  if (rows(a) != rows(b) || cols(a) != cols(b))
     return fp::fail("matrix/matrix dimension mismatch");
   return fp::ok(fp::zip_with(a, b, [](Vector const &x, Vector const &y) {
     return fp::zip_with(x, y, fp::minus);
@@ -365,11 +370,11 @@ inline fp::Result<Matrix> inverse_2x2(Matrix const &m) {
     return fp::fail("matrix is singular, no inverse exists");
 
   return fp::ok(Matrix{{m[1][1] / det, -m[0][1] / det},
-                       {m[1][0] / det, -m[0][0] / det}});
+                       {-m[1][0] / det, m[0][0] / det}});
 }
 
 inline fp::Result<Matrix> eigenvalues_2x2(Matrix const &m) {
-  if (rows(m) != 2)
+  if (rows(m) != 2 || cols(m) != 2)
     return fp::fail("eigenvalues_2x2 requires a 2x2 matrix");
 
   const double a = m[0][0];
@@ -377,7 +382,7 @@ inline fp::Result<Matrix> eigenvalues_2x2(Matrix const &m) {
   const double c = m[1][0];
   const double d = m[1][1];
 
-  const double trace = a + b;
+  const double trace = a + d;
   const double det = a * d - b * c;
   const double discriminant = (trace * trace) - 4 * det;
 
@@ -393,25 +398,30 @@ inline fp::Result<Matrix> eigenvalues_2x2(Matrix const &m) {
 
 inline fp::Result<Vector> eigenvector_2x2(Matrix const &m,
                                           std::complex<double> lambda) {
-  if (rows(m) != 2)
+  if (rows(m) != 2 || cols(m) != 2)
     return fp::fail("eigenvector_2x2 requires a 2x2 matrix");
+
+  // A real Vector cannot represent an eigenvector for a complex eigenvalue.
+  if (std::abs(lambda.imag()) > 1e-10)
+    return fp::fail("complex eigenvalue has no real eigenvector");
 
   const double a = m[0][0];
   const double b = m[0][1];
   const double c = m[1][0];
   const double d = m[1][1];
+  const double l = lambda.real();
 
   double v0 = 0.0;
   double v1 = 0.0;
 
   if (std::abs(b) > 1e-10) {
     v0 = b;
-    v1 = (lambda - a).real();
+    v1 = l - a;
   } else if (std::abs(c) > 1e-10) {
-    v0 = (lambda - d).real();
+    v0 = l - d;
     v1 = c;
   } else {
-    if (std::abs(a - lambda.real()) < 1e-10) {
+    if (std::abs(a - l) < 1e-10) {
       v0 = 1.0;
       v1 = 0.0;
     } else {
@@ -427,7 +437,7 @@ inline fp::Result<Vector> eigenvector_2x2(Matrix const &m,
 inline Matrix rotation_2d(double theta) {
   const double c = std::cos(theta);
   const double s = std::sin(theta);
-  return Matrix{{c, -s}, {s, -c}};
+  return Matrix{{c, -s}, {s, c}};
 }
 
 inline Matrix scaling_2d(double sx, double sy) {
@@ -491,7 +501,7 @@ is_linearly_independent(std::vector<Vector> const &vectors) {
 
   for (std::size_t col = 0; col < dim; ++col) {
     const auto pivot =
-        fp::find(fp::range(rank, rows.size()), [&](std::size_t row) {
+        fp::find_if(fp::range(rank, rows.size()), [&](std::size_t row) {
           return std::abs(rows[row][col]) > 1e-10;
         });
 
@@ -716,7 +726,7 @@ public:
   Value relu() const {
     auto out = std::make_shared<Node>();
     out->data = fp::cond(
-        n_->data, fp::when(fp::lt(0.0), [](double) { return 0.0; }),
+        n_->data, fp::arm(fp::below(0.0), [](double) { return 0.0; }),
         fp::otherwise([](double value) { return value; }));
     out->op = "ReLU";
     out->prev = {n_};

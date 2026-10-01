@@ -1,300 +1,210 @@
 #pragma once
 
+#include "forgefp/fp/either.hpp"
+#include "forgefp/fp/grid.hpp"
+#include "forgefp/fp/ranges.hpp"
+#include "forgefp/fp/result.hpp"
+#include "forgefp/fp/simd.hpp"
+#include "forgefp/fp/vec.hpp"
 #include "vector.hpp"
 #include <cmath>
 #include <complex>
 #include <cstddef>
 #include <cstdlib>
-#include <iostream>
-#include <ostream>
-#include <stdexcept>
+#include <forgefp/fp/validation.hpp>
+#include <optional>
+#include <string>
 #include <vector>
 
-class Matrix {
-public:
-  using value_type = double;
+namespace forgeml {
+using Matrix = std::vector<Vector>;
 
-  explicit Matrix(std::vector<std::vector<value_type>> rows)
-      : _rows(std::move(rows)) {
-    if (_rows.empty()) {
-      throw std::runtime_error("matrix cannot be empty");
-    }
-
-    const std::size_t ncols = _rows[0].size();
-    if (ncols == 0) {
-      throw std::runtime_error("matrix cannot have empty rows");
-    }
-
-    for (const auto &row : _rows) {
-      if (row.size() != ncols) {
-        throw std::runtime_error("ragged matrix");
-      }
-    }
+inline fp::Validation<Matrix> validate(Matrix const &m) {
+  if (m.empty()) {
+    return fp::invalid<Matrix>("matrix cannot be empty");
   }
 
-  std::size_t rows() const noexcept { return _rows.size(); }
-
-  std::size_t cols() const noexcept { return _rows[0].size(); }
-
-  Vector operator*(const Vector &v) const {
-    if (cols() != v.dim()) {
-      throw std::runtime_error("matrix/vector dimension mismatch");
-    }
-
-    std::vector<value_type> result(rows(), value_type{0});
-
-    for (std::size_t i = 0; i < rows(); ++i) {
-      for (std::size_t j = 0; j < cols(); ++j) {
-        result[i] += _rows[i][j] * v[j];
-      }
-    }
-
-    return Vector(std::move(result));
+  if (m.front().empty()) {
+    return fp::invalid<Matrix>("matrix cannot have empty rows");
   }
 
-  Matrix operator*(const Matrix &other) const {
-    if (cols() != other.rows()) {
-      throw std::runtime_error("matrix/matrix dimension mismatch");
-    }
+  const std::size_t ncols = m.front().size();
+  const auto bad = fp::filter(fp::enumerate(m), [ncols](auto const &entry) {
+    return entry.second.size() != ncols;
+  });
 
-    std::vector<std::vector<value_type>> result(
-        rows(), std::vector<value_type>(other.cols(), value_type{0}));
+  if (bad.empty())
+    return fp::valid(m);
 
-    for (std::size_t i = 0; i < rows(); ++i) {
-      for (std::size_t j = 0; j < other.cols(); ++j) {
-        for (std::size_t k = 0; k < cols(); ++k) {
-          result[i][j] += _rows[i][k] * other._rows[k][j];
-        }
-      }
-    }
+  return fp::invalid<Matrix>(fp::map(bad, [ncols](auto const &entry) {
+    return "row " + std::to_string(entry.first) + " has " +
+           std::to_string(entry.second.size()) + " columns, expected " +
+           std::to_string(ncols);
+  }));
+}
 
-    return Matrix(std::move(result));
+inline fp::Result<Matrix> make_matrix(Matrix rows) {
+  return fp::to_result(validate(rows));
+}
+
+inline std::size_t rows(Matrix const &m) { return m.size(); }
+
+inline std::size_t cols(Matrix const &m) {
+  return m.empty() ? 0 : m.front().size();
+}
+
+inline fp::Result<Vector> matvec(Matrix const &m, Vector const &v) {
+  if (cols(m) != v.size())
+    return fp::fail("matrix/vector dimension mismatch");
+
+  return fp::ok(fp::map(m, [&](Vector const &row) { return fp::dot(row, v); }));
+}
+
+inline fp::Result<Matrix> matmul(Matrix const &a, Matrix const &b) {
+  if (cols(a) != rows(b))
+    return fp::fail("matrix/matrix dimension mismatch");
+
+  const Matrix columns = fp::transpose(b);
+  return fp::ok(fp::map(a, [&](Vector const &row) {
+    return fp::map(columns,
+                   [&](Vector const &column) { return fp::dot(row, column); });
+  }));
+}
+
+inline Matrix scaled(Matrix const &m, double factor) {
+  return fp::map2d(m, fp::times(factor));
+}
+
+inline fp::Result<Matrix> add(Matrix const &a, Matrix const &b) {
+  if (rows(a) * cols(a) != rows(b) * cols(b))
+    return fp::fail("matrix/matrix dimension mismatch");
+
+  return fp::ok(fp::zip_with(a, b, [](Vector const &x, Vector const &y) {
+    return fp::zip_with(x, y, fp::plus);
+  }));
+}
+
+inline fp::Result<Matrix> sub(Matrix const &a, Matrix const &b) {
+  if (rows(a) * cols(a) != rows(b) * cols(b))
+    return fp::fail("matrix/matrix dimension mismatch");
+
+  return fp::ok(fp::zip_with(a, b, [](Vector const &x, Vector const &y) {
+    return fp::zip_with(x, y, fp::minus);
+  }));
+}
+
+inline Matrix transpose(Matrix const &m) { return fp::transpose(m); }
+
+namespace detail {
+
+inline double determinant_impl(Matrix const &m) {
+  const std::size_t n = rows(m);
+
+  if (n == 1)
+    return m[0][0];
+  if (n == 2)
+    return m[0][0] * m[1][1] - m[0][1] * m[1][0];
+
+  return fp::sum(fp::map(fp::range(std::size_t{0}, n), [&](std::size_t j) {
+    const Matrix minor = fp::map(fp::drop(m, 1), [j](Vector const &row) {
+      return fp::filter_map(fp::enumerate(row),
+                            [j](std::pair<std::size_t, double> const &entry)
+                                -> std::optional<double> {
+                              if (entry.first == j)
+                                return std::nullopt;
+                              return entry.second;
+                            });
+    });
+
+    const double sign = (j % 2 == 0) ? 1.0 : -1.0;
+    return sign * m[0][j] * determinant_impl(minor);
+  }));
+}
+
+} // namespace detail
+
+inline fp::Result<double> determinant(Matrix const &m) {
+  if (m.empty() || rows(m) != cols(m))
+    return fp::fail("determinant is defined only for square matrices");
+
+  return fp::ok(detail::determinant_impl(m));
+}
+
+inline fp::Result<Matrix> inverse_2x2(Matrix const &m) {
+  if (rows(m) != 2 || cols(m) != 2)
+    return fp::fail("inverse_2x2 requires a 2x2 matrix");
+
+  const double det = detail::determinant_impl(m);
+  if (std::abs(det) < 1e-12)
+    return fp::fail("matrix is singular, no inverse exists");
+
+  return fp::ok(
+      Matrix{{m[1][1] / det, -m[0][1] / det}, {-m[1][0] / det, m[0][0] / det}});
+}
+
+inline fp::Result<Matrix> eigenvalues_2x2(Matrix const &m) {
+  if (rows(m) != 2 || cols(m) != 2)
+    return fp::fail("eigenvalues_2x2 requires a 2x2 matrix");
+
+  const double a = m[0][0];
+  const double b = m[0][1];
+  const double c = m[1][0];
+  const double d = m[1][1];
+
+  const double trace = a + d;
+  const double det = a * d - b * c;
+  const double discriminant = (trace * trace) - 4 * det;
+
+  if (discriminant < 0) {
+    const double real = trace / 2;
+    const double imag = std::sqrt(-discriminant) / 2;
+    return fp::ok(Matrix{{real, imag}, {real, -imag}});
   }
 
-  Matrix operator*(const value_type &scalar) const {
-    std::vector<std::vector<value_type>> result(
-        rows(), std::vector<value_type>(cols(), value_type{0}));
+  const double s = std::sqrt(discriminant);
+  return fp::ok(Matrix{{(trace + s) / 2.0, 0.0}, {(trace - s) / 2.0, 0.0}});
+}
 
-    for (std::size_t i = 0; i < rows(); ++i) {
-      for (std::size_t j = 0; j < cols(); ++j) {
-        result[i][j] += _rows[i][j] * scalar;
-      }
-    }
+inline fp::Result<Vector> eigenvector_2x2(Matrix const &m,
+                                          std::complex<double> lambda) {
+  if (rows(m) != 2 || cols(m) != 2)
+    return fp::fail("eigenvector_2x2 requires a 2x2 matrix");
 
-    return Matrix(std::move(result));
-  }
+  if (std::abs(lambda.imag()) > 1e-10)
+    return fp::fail("complex eigenvalue has no real eigenvector");
 
-  Matrix operator-(const Matrix &other) const {
-    if (rows() * cols() != other.rows() * other.cols()) {
-      throw std::runtime_error("matrix/matrix dimension mismatch");
-    }
+  const double a = m[0][0];
+  const double b = m[0][1];
+  const double c = m[1][0];
+  const double d = m[1][1];
+  const double l = lambda.real();
 
-    std::vector<std::vector<value_type>> result(
-        rows(), std::vector<value_type>(cols(), value_type{0}));
+  double v0 = 0.0;
+  double v1 = 0.0;
 
-    for (std::size_t i = 0; i < rows(); ++i) {
-      for (std::size_t j = 0; j < cols(); ++j) {
-        result[i][j] = _rows[i][j] - other._rows[i][j];
-      }
-    }
-
-    return Matrix(std::move(result));
-  }
-
-  Matrix operator+(const Matrix &other) const {
-    if (rows() * cols() != other.rows() * other.cols()) {
-      throw std::runtime_error("matrix/matrix dimension mismatch");
-    }
-
-    std::vector<std::vector<value_type>> result(
-        rows(), std::vector<value_type>(cols(), value_type{0}));
-
-    for (std::size_t i = 0; i < rows(); ++i) {
-      for (std::size_t j = 0; j < cols(); ++j) {
-        result[i][j] = _rows[i][j] + other._rows[i][j];
-      }
-    }
-
-    return Matrix(std::move(result));
-  }
-
-  Matrix transpose() const {
-    std::vector<std::vector<value_type>> result(
-        cols(), std::vector<value_type>(rows(), value_type{0}));
-
-    for (std::size_t i = 0; i < rows(); ++i) {
-      for (std::size_t j = 0; j < rows(); ++j) {
-        result[j][i] = _rows[i][j];
-      }
-    }
-
-    return Matrix(std::move(result));
-  }
-
-  value_type determinant() const {
-    if (rows() != cols()) {
-      throw std::runtime_error(
-          "determinant is defined only for square matrices");
-    }
-
-    if (rows() == 1) {
-      return _rows[0][0];
-    }
-
-    if (rows() == 2) {
-      return _rows[0][0] * _rows[1][1] - _rows[0][1] * _rows[1][0];
-    }
-
-    value_type det = 0;
-    for (std::size_t j = 0; j < cols(); ++j) {
-      std::vector<std::vector<value_type>> minor_rows;
-
-      for (std::size_t i = 1; i < rows(); ++i) {
-        std::vector<value_type> minor_row;
-
-        for (std::size_t k = 0; k < cols(); ++k) {
-          if (k != j) {
-            minor_row.push_back(_rows[i][k]);
-          }
-        }
-
-        minor_rows.push_back(std::move(minor_row));
-      }
-
-      Matrix minor(std::move(minor_rows));
-      value_type sign = (j % 2 == 0) ? 1.0 : -1.0;
-      det += sign * _rows[0][j] * minor.determinant();
-    }
-
-    return det;
-  }
-
-  Matrix inverse_2x2() const {
-    if (rows() != 2 || cols() != 2) {
-      throw std::runtime_error("inverse_2x2 requires a 2x2 matrix");
-    }
-
-    value_type det = determinant();
-
-    if (std::abs(det) < 1e-12) {
-      throw std::runtime_error("matrix is singular, no inverse exists");
-    }
-
-    return Matrix({{_rows[1][1] / det, -_rows[0][1] / det},
-                   {_rows[1][0] / det, -_rows[0][0] / det}});
-  }
-
-  Matrix eigenvalues_2x2() const {
-    if (rows() != 2) {
-      throw std::runtime_error("eigenvalues_2x2 requires a 2x2 matrix");
-    }
-
-    value_type a = _rows[0][0];
-    value_type b = _rows[0][1];
-    value_type c = _rows[1][0];
-    value_type d = _rows[1][1];
-
-    auto trace = a + b;
-    auto det = a * d - b * c;
-    auto discriminant = (trace * trace) - 4 * det;
-
-    if (discriminant < 0) {
-      auto real = trace / 2;
-      auto imag = std::sqrt(-discriminant) / 2;
-      return Matrix({{real, imag}, {real, -imag}});
+  if (std::abs(b) > 1e-10) {
+    v0 = b;
+    v1 = l - a;
+  } else if (std::abs(c) > 1e-10) {
+    v0 = l - d;
+    v1 = c;
+  } else {
+    if (std::abs(a - l) < 1e-10) {
+      v0 = 1.0;
+      v1 = 0.0;
     } else {
-      const double s = std::sqrt(discriminant);
-      return Matrix({{(trace + s) / 2.0, 0.0}, {(trace - s) / 2.0, 0.0}});
+      v0 = 0.0;
+      v1 = 1.0;
     }
   }
 
-  Vector eigenvector_2x2(std::complex<value_type> lambda) const {
-    if (rows() != 2) {
-      throw std::runtime_error("eigenvalues_2x2 requires a 2x2 matrix");
-    }
+  const double mag = std::sqrt(v0 * v0 + v1 * v1);
+  return fp::ok(Vector{v0 / mag, v1 / mag});
+}
 
-    value_type a = _rows[0][0];
-    value_type b = _rows[0][1];
-    value_type c = _rows[1][0];
-    value_type d = _rows[1][1];
-
-    double v0, v1;
-
-    if (std::abs(b) > 1e-10) {
-      v0 = b;
-      v1 = (lambda - a).real();
-    } else if (std::abs(c) > 1e-10) {
-      v0 = (lambda - d).real();
-      v1 = c;
-    } else {
-      if (std::abs(a - lambda.real()) < 1e-10) {
-        v0 = 1, v1 = 0;
-      } else {
-        v0 = 0, v1 = 1;
-      }
-    }
-
-    const value_type mag = std::sqrt(v0 * v0 + v1 * v1);
-    return Vector({v0 / mag, v1 / mag});
-  }
-
-  static Matrix rotation_2d(const value_type &theta) {
-    value_type c = std::cos(theta);
-    value_type s = std::sin(theta);
-
-    return Matrix({{c, -s}, {s, -c}});
-  }
-
-  static Matrix scaling_2d(const value_type &sx, const value_type &sy) {
-    return Matrix({{sx, 0}, {0, sy}});
-  }
-
-  static Matrix shearing_2d(const value_type &kx, const value_type &ky) {
-    return Matrix({{1, kx}, {ky, 1}});
-  }
-
-  static Matrix reflection_x() { return Matrix({{1, 0}, {0, -1}}); }
-
-  static Matrix reflection_y() { return Matrix({{-1, 0}, {0, 1}}); }
-
-  static Matrix identity(std::size_t n) {
-    std::vector<std::vector<value_type>> rows(
-        n, std::vector<value_type>(n, value_type{0}));
-
-    for (std::size_t i = 0; i < n; ++i) {
-      rows[i][i] = value_type{1};
-    }
-
-    return Matrix(std::move(rows));
-  }
-
-  const std::vector<std::vector<value_type>> &data() const noexcept {
-    return _rows;
-  }
-
-  friend std::ostream &operator<<(std::ostream &os, const Matrix &m) {
-    os << "Matrix([";
-
-    for (std::size_t i = 0; i < m._rows.size(); ++i) {
-      os << "[";
-
-      for (std::size_t j = 0; j < m._rows[i].size(); ++j) {
-        os << m._rows[i][j];
-        if (j + 1 < m._rows[i].size()) {
-          os << ", ";
-        }
-      }
-
-      os << "]";
-      if (i + 1 < m._rows.size()) {
-        os << ", ";
-      }
-    }
-
-    os << "])";
-    return os;
-  }
-
-private:
-  std::vector<std::vector<value_type>> _rows;
-};
+inline Matrix rotation_2d(double theta) {
+  const double c = std::cos(theta);
+  const double s = std::sin(theta);
+  return Matrix{{c, -s}, {s, c}};
+}
+} // namespace forgeml

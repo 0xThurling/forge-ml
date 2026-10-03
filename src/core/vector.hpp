@@ -19,7 +19,8 @@ using Vector = std::vector<double>;
 inline constexpr double pi = 3.14159265358979323846;
 
 inline std::string dim_error(std::size_t a, std::size_t b) {
-  return "dimension mismatch" + std::to_string(a) + " vs" + std::to_string(b);
+  return "dimension mismatch: " + std::to_string(a) + " vs " +
+         std::to_string(b);
 }
 
 inline fp::Result<Vector> add(Vector const &a, Vector const &b) {
@@ -45,6 +46,13 @@ inline fp::Result<double> dot(Vector const &a, Vector const &b) {
 }
 
 inline double magnitude(Vector const &v) { return std::sqrt(fp::dot(v, v)); }
+
+inline fp::Result<Vector> normalize(Vector const &v) {
+  const double mag = magnitude(v);
+  if (mag == 0.0)
+    return fp::fail("cannot normalise zero vector");
+  return fp::ok(fp::map(v, [mag](double value) { return value / mag; }));
+}
 
 inline fp::Result<double> cosine_similarity(Vector const &a, Vector const &b) {
   if (a.size() != b.size())

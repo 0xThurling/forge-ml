@@ -2,100 +2,90 @@
 
 #include "../core/matrix.hpp"
 #include "../core/vector.hpp"
+#include "forgefp/fp/adt.hpp"
+#include "forgefp/fp/either.hpp"
+#include "forgefp/fp/ranges.hpp"
+#include "forgefp/fp/result.hpp"
+#include "forgefp/fp/simd.hpp"
+#include "forgefp/fp/vec.hpp"
+#include <cstddef>
+#include <cstdlib>
 
 namespace forgeml {
-bool is_linearly_independent(const std::vector<Vector> &vectors) {
-  if (vectors.empty()) {
-    return true;
-  }
+inline fp::Result<bool>
+is_linearly_independent(std::vector<Vector> const &vectors) {
+  if (vectors.empty())
+    return fp::ok(true);
 
-  const std::size_t n = vectors.size();
-  const std::size_t dim = vectors[0].dim();
+  const std::size_t dim = vectors.front().size();
+  if (!fp::all(vectors, [dim](Vector const &v) { return v.size() == dim; }))
+    return fp::fail("dimension mismatch in vector list");
 
-  for (const auto &v : vectors) {
-    if (v.dim() != dim) {
-      throw std::runtime_error("dimension mismatch in vector list");
-    }
-  }
-
-  std::vector<std::vector<double>> mat_rows;
-  mat_rows.reserve(n);
-  for (const auto &v : vectors) {
-    mat_rows.push_back(v.components());
-  }
-
-  Matrix mat(std::move(mat_rows));
-  std::vector<std::vector<double>> rows = mat.data();
-
+  Matrix rows = vectors;
   std::size_t rank = 0;
 
   for (std::size_t col = 0; col < dim; ++col) {
-    std::size_t pivot = rows.size();
-    for (std::size_t row = rank; row < rows.size(); ++row) {
-      if (std::abs(rows[row][col]) > 1e-10) {
-        pivot = row;
-        break;
-      }
-    }
+    const auto pivot =
+        fp::find_if(fp::range(rank, rows.size()), [&](std::size_t row) {
+          return std::abs(rows[row][col]) > 1e-10;
+        });
 
-    if (pivot == rows.size()) {
+    if (!pivot) {
       continue;
     }
 
-    std::swap(rows[rank], rows[pivot]);
+    std::swap(rows[rank], rows[*pivot]);
 
-    double scale = rows[rank][col];
-    for (double &x : rows[rank]) {
-      x /= scale;
-    }
+    const double scale_factor = rows[rank][col];
+    rows[rank] = fp::map(rows[rank], [scale_factor](double value) {
+      return value / scale_factor;
+    });
 
     for (std::size_t row = 0; row < rows.size(); ++row) {
       if (row != rank && std::abs(rows[row][col]) > 1e-10) {
-        double factor = rows[row][col];
-        for (std::size_t j = 0; j < dim; ++j) {
-          rows[row][j] -= factor * rows[rank][j];
-        }
+        const double factor = rows[row][col];
+        rows[row] = fp::zip_with(rows[row], rows[rank],
+                                 [factor](double value, double pivot_value) {
+                                   return value - factor * pivot_value;
+                                 });
       }
     }
 
     ++rank;
   }
 
-  return rank == n;
+  return fp::ok(rank == vectors.size());
 }
 
-Vector project(const Vector &a, const Vector &b) {
-  double denom = b.dot(b);
-  if (std::abs(denom) < 1e-10) {
-    throw std::runtime_error("cannot project onto near-zero vector");
-  }
+inline fp::Result<Vector> project(Vector const &a, Vector const &b) {
+  const double denom = fp::dot(b, b);
+  if (std::abs(denom) < 1e-10)
+    return fp::fail("cannot project onto near-zero vector");
 
-  double scalar = a.dot(b) / denom;
-  std::vector<double> result(b.dim());
-  for (std::size_t i = 0; i < b.dim(); ++i) {
-    result[i] = scalar * b[i];
-  }
-  return Vector(std::move(result));
+  return fp::ok(scale(b, fp::dot(a, b) / denom));
 }
 
-std::vector<Vector> gram_schmidt(const std::vector<Vector> &vectors) {
-  std::vector<Vector> orthonormal;
+inline fp::Result<std::vector<Vector>>
+gram_schmidt(std::vector<Vector> const &vectors) {
+  const auto orthonormal = fp::fold_left(
+      vectors, std::vector<Vector>{},
+      [](std::vector<Vector> orthonormal, Vector const &v) {
+        const Vector w =
+            fp::fold_left(orthonormal, v, [](Vector w, Vector const &u) {
+              const double scalar = fp::dot(w, u) / fp::dot(u, u);
+              return fp::zip_with(w, u, [scalar](double a, double b) {
+                return a - scalar * b;
+              });
+            });
 
-  for (const auto &v : vectors) {
-    Vector w = v;
+        if (magnitude(w) < 1e-10) {
+          return orthonormal;
+        }
 
-    for (const auto &u : orthonormal) {
-      Vector proj = project(w, u);
-      w = w - proj;
-    }
+        orthonormal.push_back(fp::value_or(normalize(w), w));
+        return orthonormal;
+      });
 
-    if (w.magnitude() < 1e-10) {
-      continue;
-    }
-
-    orthonormal.push_back(w.normalize());
-  }
-
-  return orthonormal;
+  return fp::ok(orthonormal);
 }
 } // namespace forgeml

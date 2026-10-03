@@ -5,6 +5,7 @@
 #include "forgefp/fp/ranges.hpp"
 #include "forgefp/fp/result.hpp"
 #include "forgefp/fp/simd.hpp"
+#include "forgefp/fp/string.hpp"
 #include "forgefp/fp/vec.hpp"
 #include "vector.hpp"
 #include <cmath>
@@ -206,5 +207,31 @@ inline Matrix rotation_2d(double theta) {
   const double c = std::cos(theta);
   const double s = std::sin(theta);
   return Matrix{{c, -s}, {s, c}};
+}
+
+inline Matrix scaling_2d(double sx, double sy) {
+  return Matrix{{sx, 0.0}, {0.0, sy}};
+}
+
+inline Matrix shearing_2d(double kx, double ky) {
+  return Matrix{{1.0, kx}, {ky, 1.0}};
+}
+
+inline Matrix reflection_x() { return Matrix{{1.0, 0.0}, {0.0, -1.0}}; }
+
+inline Matrix reflection_y() { return Matrix{{-1.0, 0.0}, {0.0, 1.0}}; }
+
+inline Matrix identity(std::size_t n) {
+  return fp::tabulate(n, [n](std::size_t i) {
+    return fp::tabulate(n, [i](std::size_t j) { return i == j ? 1.0 : 0.0; });
+  });
+}
+
+inline std::ostream &operator<<(std::ostream &os, Matrix const &m) {
+  const auto rendered = fp::map(m, [](Vector const &row) {
+    return "[" + fp::str::join(row, ", ") + "]";
+  });
+
+  return os << "Matrix([" << fp::str::join(rendered, ", ") << "])";
 }
 } // namespace forgeml

@@ -1,117 +1,106 @@
 #pragma once
 #include "./engine.hpp"
+#include "forgefp/fp/either.hpp"
+#include "forgefp/fp/ranges.hpp"
+#include "forgefp/fp/vec.hpp"
 #include <cmath>
 #include <cstddef>
 #include <random>
 #include <vector>
 
-struct Module {
-  virtual std::vector<forgeml::Value> parameters() { return {}; }
-  void zero_grad() {
-    for (auto &p : parameters())
-      p.n_->grad = 0.0;
-  }
+namespace forgeml {
+struct Neuron {
+  std::vector<Value> w;
+  Value b;
+  bool nonlin = true;
 };
 
-struct Neuron : Module {
-  std::vector<forgeml::Value> w;
-  forgeml::Value b;
-  bool nonlin;
-
-  Neuron(int nin, bool nonlin_ = true) : w(nin), b(0.0), nonlin(nonlin_) {
-    std::mt19937 rng(std::random_device{}());
-    // Scale by 1/sqrt(fan-in) so activations stay O(1) and ReLUs are less
-    // likely to die under random init.
-    const double bound = 1.0 / std::sqrt(static_cast<double>(nin));
-    std::uniform_real_distribution<double> dist(-bound, bound);
-
-    for (auto &wi : w)
-      wi = forgeml::Value(dist(rng));
-
-    b = forgeml::Value(0.0);
-  }
-
-  forgeml::Value operator()(const std::vector<forgeml::Value> &x) const {
-    forgeml::Value act = b;
-
-    for (std::size_t i = 0; i < w.size(); ++i) {
-      act = act + w[i] * x[i];
-    }
-
-    return nonlin ? act.relu() : act;
-  }
-
-  std::vector<forgeml::Value> parameters() override {
-    auto params = w;
-    params.push_back(b);
-    return params;
-  }
-};
-
-struct Layer : Module {
+struct Layer {
   std::vector<Neuron> neurons;
-
-  Layer(int nin, int nout, bool nonlin = true) {
-    neurons.reserve(nout);
-    for (int i = 0; i < nout; ++i) {
-      neurons.emplace_back(nin, nonlin);
-    }
-  }
-
-  std::vector<forgeml::Value>
-  operator()(const std::vector<forgeml::Value> &x) const {
-    std::vector<forgeml::Value> out;
-    out.reserve(neurons.size());
-    for (auto &n : neurons) {
-      out.push_back(n(x));
-    }
-    return out;
-  }
-
-  std::vector<forgeml::Value> parameters() override {
-    std::vector<forgeml::Value> params;
-
-    for (auto &n : neurons) {
-      auto np = n.parameters();
-      params.insert(params.end(), np.begin(), np.end());
-    }
-
-    return params;
-  }
 };
 
-struct MLP : Module {
+struct MLP {
   std::vector<Layer> layers;
-
-  MLP(int nin, const std::vector<int> &nouts) {
-    std::vector<int> sz;
-    sz.reserve(nouts.size());
-    sz.push_back(nin);
-
-    for (int o : nouts) {
-      sz.push_back(o);
-    }
-
-    for (std::size_t i = 0; i + 1 < sz.size(); ++i) {
-      bool nonlin = (i + 1 != sz.size() - 1);
-      layers.emplace_back(sz[i], sz[i + 1], nonlin);
-    }
-  }
-
-  std::vector<forgeml::Value> operator()(std::vector<forgeml::Value> x) const {
-    for (auto &layer : layers)
-      x = layer(x);
-
-    return x;
-  }
-
-  std::vector<forgeml::Value> parameters() override {
-      std::vector<forgeml::Value> params;
-      for (auto& layer: layers) {
-          auto lp = layer.parameters();
-          params.insert(params.end(), lp.begin(), lp.end());
-      }
-
-      return params;
-  }
 };
+
+inline std::mt19937 &default_rng() {
+  static std::mt19937 rng(std::random_device{}());
+  return rng;
+}
+
+inline Neuron make_neuron(int nin, bool nonlin = true,
+                          std::mt19937 &rng = default_rng()) {
+  const double bound = 1.0 / std::sqrt(static_cast<double>(nin));
+  std::uniform_real_distribution<double> dist(-bound, bound);
+
+  Neuron neuron;
+  neuron.nonlin = nonlin;
+  neuron.w = fp::map(fp::range(0, nin), [&](int) { return Value(dist(rng)); });
+  neuron.b = Value(0.0);
+
+  return neuron;
+}
+
+inline Layer make_layer(int nin, int nout, bool nonlin = true,
+                        std::mt19937 &rng = default_rng()) {
+  Layer layer;
+  layer.neurons = fp::map(fp::range(0, nout),
+                          [&](int) { return make_neuron(nin, nonlin, rng); });
+  return layer;
+}
+
+inline MLP make_mlp(int nin, std::vector<int> const &nouts,
+                    std::mt19937 &rng = default_rng()) {
+  const auto sizes = fp::concat(std::vector<std::vector<int>>{{nin}, nouts});
+  const auto spans = fp::windows(sizes, 2);
+
+  MLP model;
+  model.layers = fp::map(fp::enumerate(spans), [&](auto const &entry) {
+    const bool nonlin = entry.first + 1 != spans.size();
+    return make_layer(entry.second[0], entry.second[1], nonlin, rng);
+  });
+  return model;
+}
+
+inline std::vector<Value> parameters(Neuron const &neuron) {
+  return fp::concat(std::vector<std::vector<Value>>{neuron.w, {neuron.b}});
+}
+
+inline std::vector<Value> parameters(Layer const &layer) {
+  return fp::flat_map(layer.neurons,
+                      [](Neuron const &neuron) { return parameters(neuron); });
+}
+
+inline std::vector<Value> parameters(MLP const &model) {
+  return fp::flat_map(model.layers,
+                      [](Layer const &layer) { return parameters(layer); });
+}
+
+inline Value forward(Neuron const &neuron, std::vector<Value> const &x) {
+  const Value act =
+      fp::fold_left(fp::zip(neuron.w, x), neuron.b,
+                    [](Value acc, std::pair<Value, Value> const &pair) {
+                      return acc + pair.first * pair.second;
+                    });
+
+  return neuron.nonlin ? act.relu() : act;
+}
+
+inline std::vector<Value> forward(Layer const &layer,
+                                  std::vector<Value> const &x) {
+  return fp::map(layer.neurons,
+                 [&](Neuron const &neuron) { return forward(neuron, x); });
+}
+
+inline std::vector<Value> forward(MLP const &model, std::vector<Value> x) {
+  return fp::fold_left(model.layers, std::move(x),
+                       [](std::vector<Value> xs, Layer const &layer) {
+                         return forward(layer, xs);
+                       });
+}
+
+inline void zero_grad(MLP &model) {
+  for (auto const &parameter : parameters(model))
+    parameter.n_->grad = 0.0;
+}
+} // namespace forgeml

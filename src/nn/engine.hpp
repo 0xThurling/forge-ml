@@ -1,5 +1,9 @@
 #pragma once
 #include <cmath>
+#include <forgefp/fp/adt.hpp>
+#include <forgefp/fp/combinators.hpp>
+#include <forgefp/fp/ops.hpp>
+#include <forgefp/fp/ranges.hpp>
 #include <functional>
 #include <memory>
 #include <string>
@@ -35,7 +39,8 @@ public:
     std::weak_ptr<Node> wa = a.n_, wb = b.n_, wout = out;
     out->backward = [wa, wb, wout]() {
       auto pa = wa.lock(), pb = wb.lock(), po = wout.lock();
-      if (!pa || !pb || !po) return;
+      if (!pa || !pb || !po)
+        return;
       pa->grad += po->grad;
       pb->grad += po->grad;
     };
@@ -43,15 +48,11 @@ public:
     return Value(out);
   }
 
-  friend Value operator+(const Value& a, double b) {
-      return a + Value(b);
-  }
+  friend Value operator+(const Value &a, double b) { return a + Value(b); }
 
-  friend Value operator+(double a, const Value& b) {
-      return Value(a) + b;
-  }
+  friend Value operator+(double a, const Value &b) { return Value(a) + b; }
 
-  friend Value operator*(const Value& a, const Value& b) {
+  friend Value operator*(const Value &a, const Value &b) {
     auto out = std::make_shared<Node>();
     out->data = a.n_->data * b.n_->data;
     out->op = "*";
@@ -60,7 +61,8 @@ public:
     std::weak_ptr<Node> wa = a.n_, wb = b.n_, wout = out;
     out->backward = [wa, wb, wout]() {
       auto pa = wa.lock(), pb = wb.lock(), po = wout.lock();
-      if (!pa || !pb || !po) return;
+      if (!pa || !pb || !po)
+        return;
       pa->grad += pb->data * po->grad;
       pb->grad += pa->data * po->grad;
     };
@@ -68,13 +70,9 @@ public:
     return Value(out);
   }
 
-  friend Value operator*(const Value& a, double b) {
-      return a * Value(b);
-  }
+  friend Value operator*(const Value &a, double b) { return a * Value(b); }
 
-  friend Value operator*(double a, const Value& b) {
-      return Value(a) * b;
-  }
+  friend Value operator*(double a, const Value &b) { return Value(a) * b; }
 
   Value pow(double k) const {
     auto out = std::make_shared<Node>();
@@ -84,65 +82,68 @@ public:
 
     std::weak_ptr<Node> wbase = n_, wout = out;
     out->backward = [wbase, wout, k]() {
-        auto base = wbase.lock();
-        auto po = wout.lock();
-        if (!base || !po) return;
-        // d/dx (x^k) = k * x^(k-1)
-        base->grad += k * std::pow(base->data, k - 1.0) * po->grad;
+      auto base = wbase.lock();
+      auto po = wout.lock();
+      if (!base || !po)
+        return;
+      // d/dx (x^k) = k * x^(k-1)
+      base->grad += k * std::pow(base->data, k - 1.0) * po->grad;
     };
 
     return Value(out);
   };
 
-  friend Value operator/(const Value& a, const Value& b) {
+  friend Value operator/(const Value &a, const Value &b) {
     return a * b.pow(-1.0);
   }
 
-  Value operator-() const {
-    return *this * Value(-1.0);
-  }
+  Value operator-() const { return *this * Value(-1.0); }
 
-  Value operator-(const Value &a) {
-      return *this + (-a);
-  }
+  Value operator-(const Value &a) { return *this + (-a); }
 
   friend Value operator-(double lhs, const Value &rhs) {
-      return Value(lhs) - rhs;
+    return Value(lhs) - rhs;
   }
 
   Value relu() const {
-      auto out = std::make_shared<Node>();
-      out->data = n_->data < 0.0 ? 0.0 : n_->data;
-      out->op = "ReLU";
-      out->prev = {n_};
+    auto out = std::make_shared<Node>();
+    out->data =
+        fp::cond(n_->data, fp::arm(fp::below(0.0), [](double) { return 0.0; }),
+                 fp::otherwise([](double value) { return value; }));
+    out->op = "ReLU";
+    out->prev = {n_};
 
-      std::weak_ptr<Node> win = n_, wout = out;
-      out->backward = [win, wout] () {
-        auto pi = win.lock(), po = wout.lock();
-        if (!pi || !po) return;
-        pi->grad += (po->data > 0.0 ? 1.0 : 0.0) * po->grad;
-      };
+    std::weak_ptr<Node> win = n_, wout = out;
+    out->backward = [win, wout]() {
+      auto pi = win.lock(), po = wout.lock();
+      if (!pi || !po)
+        return;
+      pi->grad += (po->data > 0.0 ? 1.0 : 0.0) * po->grad;
+    };
 
-      return Value(out);
+    return Value(out);
   }
 
   void backward() {
-      std::vector<std::shared_ptr<Node>> topo;
-      std::unordered_set<Node*> seen;
+    std::vector<std::shared_ptr<Node>> topo;
+    std::unordered_set<Node *> seen;
 
-      std::function<void(const std::shared_ptr<Node>&)> dfs =
-          [&](const std::shared_ptr<Node>& cur){
-            if (!cur || seen.contains(cur.get())) return;
-            seen.insert(cur.get());
-            for (auto& p : cur->prev) dfs(p);
-            topo.push_back(cur);
-          };
+    auto visit = fp::fix([&](auto recur, std::shared_ptr<Node> const &cur) {
+      if (!cur || seen.contains(cur.get()))
+        return;
 
-      dfs(n_);
-      n_->grad = 1.0;
-      for (auto it = topo.rbegin(); it != topo.rend(); ++it) {
-        (*it)->backward();
-      }
+      seen.insert(cur.get());
+      for (auto const &parent : cur->prev)
+        recur(parent);
+
+      topo.push_back(cur);
+    });
+
+    visit(n_);
+
+    n_->grad = 1.0;
+    for (auto const &node : fp::reverse(topo))
+      node->backward();
   }
 };
 } // namespace forgeml
